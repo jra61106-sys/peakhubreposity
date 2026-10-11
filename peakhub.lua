@@ -48,8 +48,6 @@ local carrySpeedEnabled = false
 local laggerModeEnabled = false
 local laggerSpeedEnabled = false
 local laggerCarryEnabled = false
-local customSpeedEnabled = false
-local customCarryEnabled = false
 local autoCarryBoost = false
 
 local Config = {
@@ -60,10 +58,6 @@ local Config = {
     LaggerSpeed = 40,
     LaggerCarry = 20,
     LaggerCarryKey = "X",
-    CustomSpeed = 65,
-    CustomCarry = 33,
-    CustomSpeedKey = "None",
-    CustomCarryKey = "None",
     TPDownKey = "E",
     DropKey = "F",
     InstaResetKey = "G",
@@ -90,6 +84,7 @@ local Config = {
     HideUIKey = "RightControl",
     MobileButtonSize = 50,
     StealBarSize = 50,
+    UIBackgroundIndex = 1,
     CircleButtons = false,
     IntroEnabled = true,
     UIBackgroundUrl = "https://files.catbox.moe/sz7icy.png",
@@ -101,6 +96,7 @@ local Config = {
     CustomAnim = false,
     Unwalk = false,
     AnimPack = "Bubbly",
+    BatSkin = "Katana",
     AntiLag = false,
     StretchRes = false,
     FOVChange = false,
@@ -114,6 +110,9 @@ local Config = {
     AutoSteal = false,
     AutoStealMode = "Normal",
     AutoStealVersion = "V1",
+    AutoStealStopAt = 75,
+    AutoStealStopWhenHit = false,
+    AutoStealHitPauseSeconds = 1.3,
     AutoStealRadius = 61,
     AutoStealRadiusNormal = 61,
     AutoStealRadiusSemi = 9,
@@ -213,7 +212,7 @@ main.Position = UDim2.new(0, 24, 0.22, -200)
 main.BackgroundColor3 = COLORS.Background
 main.BackgroundTransparency = 1
 main.BorderSizePixel = 0
-main.Active = true
+main.Active = false
 main.Draggable = true
 main.Parent = screenGui
 corner(main, 14)
@@ -229,12 +228,14 @@ uiBgImage.Name = "UIBackground"
 uiBgImage.Size = UDim2.new(1, 0, 1, 0)
 uiBgImage.Position = UDim2.new(0, 0, 0, 0)
 uiBgImage.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-uiBgImage.BackgroundTransparency = 1
+uiBgImage.BackgroundTransparency = 0
 uiBgImage.BorderSizePixel = 0
 uiBgImage.Image = ""
 uiBgImage.ScaleType = Enum.ScaleType.Crop
 uiBgImage.ImageTransparency = 0
 uiBgImage.ZIndex = 0
+uiBgImage.Active = false
+uiBgImage.Selectable = false
 uiBgImage.Visible = true
 uiBgImage.Parent = main
 corner(uiBgImage, 14)
@@ -246,63 +247,76 @@ uiBgDim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 uiBgDim.BackgroundTransparency = 0.94
 uiBgDim.BorderSizePixel = 0
 uiBgDim.ZIndex = 1
+uiBgDim.Active = false
+uiBgDim.Selectable = false
 uiBgDim.Parent = main
 corner(uiBgDim, 14)
 
 local BG_DEFAULT_URL = "https://files.catbox.moe/sz7icy.png"
-local BG_FILE = "PeakHub_UI_BG_Catbox.png"
+
+local function backgroundCacheFile(url)
+    return "PeakHub_UI_BG_" .. tostring(url):match("([^/]+)$"):gsub("[^%w%.%-_]", "_")
+end
+
+local function cachedBackgroundAsset(url)
+    local file = backgroundCacheFile(url)
+    if not (isfile and isfile(file)) then return nil end
+    local id
+    pcall(function()
+        if getcustomasset then
+            id = getcustomasset(file)
+        elseif getsynasset then
+            id = getsynasset(file)
+        end
+    end)
+    return id
+end
 
 local function applyUIBackground(url)
     url = tostring(url or BG_DEFAULT_URL):gsub("^%s+", ""):gsub("%s+$", "")
     if url == "" then url = BG_DEFAULT_URL end
-    Config.UIBackgroundUrl = url
     local lower = string.lower(url)
     local isRobloxAsset = lower:match("^rbxassetid://%d+$") ~= nil
     if not isRobloxAsset and not (lower:sub(1, 8) == "https://" or lower:sub(1, 7) == "http://") then
         url = BG_DEFAULT_URL
-        Config.UIBackgroundUrl = url
     end
+    Config.UIBackgroundUrl = url
 
     local function setImage(imageId)
-        if not imageId then return end
+        if not imageId then
+            uiBgImage.Image = ""
+            uiBgImage.Visible = true
+            uiBgImage.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            uiBgImage.BackgroundTransparency = 0
+            main.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            main.BackgroundTransparency = 0
+            return
+        end
+        uiBgImage.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        uiBgImage.BackgroundTransparency = 0
         uiBgImage.Image = imageId
         uiBgImage.Visible = true
         main.BackgroundTransparency = 1
     end
-
 
     if isRobloxAsset then
         setImage(url)
         return
     end
 
-    local function fromFile()
-        local id = nil
-        if not (isfile and isfile(BG_FILE)) then return nil end
-        pcall(function()
-            if getcustomasset then
-                id = getcustomasset(BG_FILE)
-            elseif getsynasset then
-                id = getsynasset(BG_FILE)
-            end
-        end)
-        return id
-    end
-
-
-    local cached = fromFile()
+    -- Use the on-disk asset immediately when available. Otherwise show the URL right away
+    -- while the local copy downloads, instead of waiting for the HTTP request to finish.
+    local cached = cachedBackgroundAsset(url)
     if cached then
         setImage(cached)
         return
     end
-
+    setImage(url)
 
     task.spawn(function()
-        local data = nil
-        pcall(function()
-            data = game:HttpGet(url)
-        end)
-        if (not data or #data < 100) then
+        local data
+        pcall(function() data = game:HttpGet(url) end)
+        if not data or #data < 100 then
             pcall(function()
                 local req = request or http_request or (syn and syn.request)
                 if not req then return end
@@ -311,11 +325,14 @@ local function applyUIBackground(url)
             end)
         end
         if data and #data > 100 and writefile then
-            pcall(function() writefile(BG_FILE, data) end)
+            local file = backgroundCacheFile(url)
+            pcall(function() writefile(file, data) end)
+            local asset = cachedBackgroundAsset(url)
+            -- Do not let a slow download for an older selection replace the current image.
+            if asset and Config.UIBackgroundUrl == url then
+                setImage(asset)
+            end
         end
-        local id = fromFile()
-        if not id then id = url end
-        setImage(id)
     end)
 end
 
@@ -778,7 +795,8 @@ function keybindBadge(parent, initialText, offsetX, width, onKeyChanged)
         local conn
         conn = UserInputService.InputBegan:Connect(function(input, gp)
             local isKeyboard = input.UserInputType == Enum.UserInputType.Keyboard
-            local isGamepad = input.UserInputType == Enum.UserInputType.Gamepad1
+            local inputTypeName = input.UserInputType.Name
+            local isGamepad = inputTypeName:match("^Gamepad%d+$") ~= nil
             if not (isKeyboard or isGamepad) then return end
 
             local key = input.KeyCode.Name
@@ -913,7 +931,7 @@ function toggleRow(parent, labelText, defaultOn, onToggle, initialKey, onKeyChan
     track.BorderSizePixel = 0
     track.Parent = row
     corner(track, 12)
-    local toggleStroke = stroke(track, 1.5, COLORS.ToggleActive, 0)
+    local toggleStroke = stroke(track, 1.5, _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0), 0)
 
     local knob = Instance.new("Frame")
     knob.Size = UDim2.new(0, 18, 0, 18)
@@ -936,12 +954,15 @@ function toggleRow(parent, labelText, defaultOn, onToggle, initialKey, onKeyChan
         track.BackgroundTransparency = 0
         if toggleStroke then
             TweenService:Create(toggleStroke, info, {
-                Color = COLORS.ToggleActive,
+                Color = _G.PeakHubThemeAccent or COLORS.ToggleActive or COLORS.Accent or Color3.fromRGB(255, 120, 0),
                 Transparency = 0,
                 Thickness = on and 2 or 1.5,
             }):Play()
         end
 
+        if toggleStroke then
+            toggleStroke.Color = _G.PeakHubThemeAccent or COLORS.ToggleActive or COLORS.Accent or Color3.fromRGB(255, 120, 0)
+        end
         local rowStroke = row:FindFirstChild("RowStroke")
         if rowStroke then
             TweenService:Create(rowStroke, info, {
@@ -981,7 +1002,7 @@ function toggleWithKeybindRow(parent, labelText, defaultOn, initialKey, onToggle
     track.BorderSizePixel = 0
     track.Parent = row
     corner(track, 12)
-    stroke(track, 1, COLORS.Stroke, 0.4)
+    stroke(track, 1, Color3.fromRGB(255, 120, 0), 0.4)
 
     local knob = Instance.new("Frame")
     knob.Size = UDim2.new(0, 18, 0, 18)
@@ -1018,6 +1039,13 @@ function toggleWithKeybindRow(parent, labelText, defaultOn, initialKey, onToggle
         saveConfig()
     end)
 
+    _G.PeakHubSetBatAimbotUI = function(value)
+        if labelText ~= "Bat Aimbot" then return end
+        on = value == true
+        local info = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        TweenService:Create(knob, info, {Position = on and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)}):Play()
+        setRowGlow(row, on)
+    end
     return row
 end
 
@@ -1034,7 +1062,7 @@ function toggleWithNumberRow(parent, labelText, defaultOn, initialVal, onToggle,
     track.BorderSizePixel = 0
     track.Parent = row
     corner(track, 12)
-    stroke(track, 1, COLORS.Stroke, 0.4)
+    stroke(track, 1, Color3.fromRGB(255, 120, 0), 0.4)
 
     local knob = Instance.new("Frame")
     knob.Size = UDim2.new(0, 18, 0, 18)
@@ -1619,17 +1647,6 @@ function getActiveSpeed()
     local inLagger = laggerModeEnabled or laggerSpeedEnabled or laggerCarryEnabled or keyLaggerCarry
 
 
-    if customCarryEnabled then
-        return tonumber(Config.CustomCarry) or 33
-    end
-    if customSpeedEnabled then
-        if autoCarryBoost and Config.AutoCarrySpeed then
-            return tonumber(Config.CustomCarry) or 33
-        end
-        return tonumber(Config.CustomSpeed) or 65
-    end
-
-
     if carrySpeedEnabled then
         return inLagger and (tonumber(Config.LaggerCarry) or 20) or (tonumber(Config.CarrySpeed) or 29)
     end
@@ -1652,6 +1669,54 @@ end
 
 local autoTPDownConn = nil
 
+local function getTPDownLandingY(char, root, hum)
+    local halfHeight = 1
+    pcall(function() halfHeight = math.max(1, root.Size.Y * 0.5) end)
+    local hipOffset = halfHeight * 3
+    pcall(function()
+        if hum.RigType == Enum.HumanoidRigType.R6 then
+            hipOffset = halfHeight * 3
+        else
+            hipOffset = halfHeight + (hum.HipHeight or halfHeight * 2)
+        end
+    end)
+    if hipOffset ~= hipOffset or hipOffset < 1 or hipOffset > 12 then hipOffset = halfHeight * 3 end
+
+    local ignored = {char}
+    pcall(function()
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LP and player.Character then table.insert(ignored, player.Character) end
+        end
+    end)
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = ignored
+    pcall(function() params.FilterType = Enum.RaycastFilterType.Exclude end)
+    params.IgnoreWater = true
+    pcall(function() params.RespectCanCollide = true end)
+
+    local pos = root.Position
+    local castY = pos.Y - math.max(1, root.Size.Y * 0.5) - 0.1
+    local floorY
+    for _ = 1, 12 do
+        local hit
+        pcall(function() hit = workspace:Raycast(Vector3.new(pos.X, castY, pos.Z), Vector3.new(0, -4000, 0), params) end)
+        if not hit then break end
+        local part = hit.Instance
+        local skip = false
+        pcall(function()
+            if part:IsA("BasePart") and not part.CanCollide then skip = true end
+            local model = part:FindFirstAncestorOfClass("Model")
+            if model and model:FindFirstChildOfClass("Humanoid") then skip = true end
+        end)
+        if not skip then floorY = hit.Position.Y; break end
+        table.insert(ignored, part)
+        params.FilterDescendantsInstances = ignored
+        castY = hit.Position.Y - 0.05
+    end
+    if floorY then return floorY + hipOffset + 0.15 end
+    return -7
+end
+
 function doAutoTPDown(force)
     local char = LP.Character
     if not char then return end
@@ -1664,12 +1729,18 @@ function doAutoTPDown(force)
         if hrp.Position.Y < (tonumber(Config.TPDownHeight) or 20) then return end
     end
 
+    local landingY = getTPDownLandingY(char, hrp, hum)
     local _, yaw = hrp.CFrame:ToEulerAnglesYXZ()
-    hrp.CFrame = CFrame.new(hrp.Position.X, -7, hrp.Position.Z) * CFrame.Angles(0, yaw, 0)
-    _speedLVClear(hrp)
-    hrp.AssemblyLinearVelocity = Vector3.zero
-    hrp.AssemblyAngularVelocity = Vector3.zero
-    pcall(function() hrp.Velocity = Vector3.zero end)
+    -- VX7-style TP Down lands at the detected floor instead of a fixed Y=-7.
+    -- Preserve horizontal speed so this doesn't switch the active speed controller.
+    local currentVelocity = hrp.AssemblyLinearVelocity
+    hrp.CFrame = CFrame.new(hrp.Position.X, landingY, hrp.Position.Z) * CFrame.Angles(0, yaw, 0)
+    hrp.AssemblyLinearVelocity = Vector3.new(currentVelocity.X, 0, currentVelocity.Z)
+    pcall(function()
+        local current = hrp.Velocity
+        hrp.Velocity = Vector3.new(current.X, 0, current.Z)
+    end)
+    pcall(function() hrp.AssemblyAngularVelocity = Vector3.zero end)
     pcall(function() hrp.RotVelocity = Vector3.zero end)
 end
 
@@ -1803,17 +1874,6 @@ numberBadge(laggerRow, Config.LaggerCarry, -56, 40, function(val)
     Config.LaggerCarry = val
 end)
 
-local customRow = rowBase(movement, "Custom Speed", false)
-keybindBadge(customRow, Config.CustomSpeedKey or "None", -156, 48, function(key)
-    Config.CustomSpeedKey = key
-end)
-numberBadge(customRow, Config.CustomSpeed or 65, -102, 40, function(val)
-    Config.CustomSpeed = val
-end)
-numberBadge(customRow, Config.CustomCarry or 33, -56, 40, function(val)
-    Config.CustomCarry = val
-end)
-
 toggleRow(movement, "Auto Carry Speed", Config.AutoCarrySpeed, function(state)
     Config.AutoCarrySpeed = state
 end)
@@ -1871,10 +1931,39 @@ local mirrorTPPreviousY = {}
 local mirrorTPDownEnabled = Config.MirrorTPDown == true
 local mirrorTPDownSetVisual = nil
 
+-- Equipaggia la mazza una sola volta quando si attiva Bat Aimbot/Auto Swing.
+-- Non forza continuamente l'equipaggiamento: il giocatore può usare altri tool.
+local function peakEquipBatOnce()
+    local character = LP.Character
+    local backpack = LP:FindFirstChildOfClass("Backpack")
+    local function isBatTool(tool)
+        if not tool or not tool:IsA("Tool") then return false end
+        local name = tool.Name:lower()
+        return name:find("bat", 1, true) ~= nil or name:find("slap", 1, true) ~= nil
+    end
+    if character then
+        local equipped = character:FindFirstChildOfClass("Tool")
+        if isBatTool(equipped) then return true end
+    end
+    if not character or not backpack then return false end
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if isBatTool(tool) then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                pcall(function() humanoid:EquipTool(tool) end)
+                return true
+            end
+        end
+    end
+    return false
+end
+
 toggleWithKeybindRow(combat, "Bat Aimbot", Config.BatAimbot, Config.BatAimbotKey, function(state)
     Config.BatAimbot = state
     State.autoBatToggled = state
+    if mobBtnRefs and mobBtnRefs.autoBat then pcall(mobBtnRefs.autoBat, state) end
     if state then
+        peakEquipBatOnce()
         if startBatAimbot then startBatAimbot() end
     else
         if stopBatAimbot then stopBatAimbot() end
@@ -1890,6 +1979,7 @@ end)
 
 toggleRow(combat, "Auto Swing", Config.AutoSwing, function(state)
     Config.AutoSwing = state
+    if state then peakEquipBatOnce() end
 end)
 
 toggleRow(combat, "Mirror TP Down", Config.MirrorTPDown, function(state)
@@ -1904,13 +1994,28 @@ sectionLabel(combat, "AUTO STEAL")
 toggleRow(combat, "Auto Steal", Config.AutoSteal, function(state)
     Config.AutoSteal = state
     if state then
-        startAutoStealSystem()
+        if os.clock() >= (Config._AutoStealHitPauseUntil or 0) then
+            startAutoStealSystem()
+        end
     else
         stopAutoStealSystem()
     end
 end)
 
+toggleRow(combat, "Ragdoll Steal", Config.AutoStealStopWhenHit, function(state)
+    Config.AutoStealStopWhenHit = state
+    if not state and os.clock() < (Config._AutoStealHitPauseUntil or 0) then
+        Config._AutoStealHitPauseUntil = 0
+        if Config.AutoSteal then
+            stopAutoStealSystem()
+            startAutoStealSystem()
+        end
+    end
+    saveConfig()
+end)
+
 local stealVersionRow
+local stealStopAtRow
 local setStealRadiusBadge
 
 
@@ -1927,15 +2032,17 @@ modeButtonsRow(combat, { "Normal", "Semi" }, Config.AutoStealMode, function(mode
     if mode == "Semi" then
         Config.AutoStealRadius = Config.AutoStealRadiusSemi or 9
         if stealVersionRow then stealVersionRow.Visible = false end
+        if stealStopAtRow then stealStopAtRow.Visible = false end
     else
         Config.AutoStealRadius = Config.AutoStealRadiusNormal or 61
         if stealVersionRow then stealVersionRow.Visible = true end
+        if stealStopAtRow then stealStopAtRow.Visible = Config.AutoStealVersion == "V2" end
     end
     if setStealRadiusBadge then setStealRadiusBadge(Config.AutoStealRadius) end
     pcall(function() refreshStealBarMeta() end)
     if Config.AutoSteal then
         stopAutoStealSystem()
-        startAutoStealSystem()
+        if os.clock() >= (Config._AutoStealHitPauseUntil or 0) then startAutoStealSystem() end
     end
 end)
 
@@ -1944,15 +2051,63 @@ if Config.AutoStealVersion == "V3" then Config.AutoStealVersion = "V2" end
 
 stealVersionRow = modeButtonsRow(combat, { "V1", "V2" }, Config.AutoStealVersion, function(ver)
     Config.AutoStealVersion = ver
+    if stealStopAtRow then
+        stealStopAtRow.Visible = Config.AutoStealMode ~= "Semi" and ver == "V2"
+    end
     pcall(function() refreshStealBarMeta() end)
     if Config.AutoSteal then
         stopAutoStealSystem()
-        startAutoStealSystem()
+        if os.clock() >= (Config._AutoStealHitPauseUntil or 0) then startAutoStealSystem() end
     end
 end)
 if Config.AutoStealMode == "Semi" then
     stealVersionRow.Visible = false
 end
+
+Config.AutoStealStopAt = ({[75]=75,[80]=80,[85]=85,[90]=90,[95]=95})[tonumber(Config.AutoStealStopAt)] or 75
+stealStopAtRow = rowBase(combat, "Stop At", false)
+local stopAtChoices = { 75, 80, 85, 90, 95 }
+local stopAtButtons = {}
+local function refreshStopAtButtons()
+    for percent, button in pairs(stopAtButtons) do
+        local active = percent == Config.AutoStealStopAt
+        button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        local outline = button:FindFirstChildOfClass("UIStroke")
+        if outline then
+            outline.Color = active and COLORS.Accent or COLORS.AccentSoft
+            outline.Transparency = active and 0 or 0.45
+            outline.Thickness = active and 2 or 1.2
+        end
+    end
+end
+for index, percent in ipairs(stopAtChoices) do
+    local button = Instance.new("TextButton")
+    button.Name = "StopAt" .. tostring(percent)
+    button.Text = tostring(percent) .. "%"
+    button.Font = Enum.Font.GothamBlack
+    button.TextSize = 10
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.AutoButtonColor = false
+    button.Size = UDim2.new(0, 30, 0, 26)
+    button.Position = UDim2.new(1, -160 + (index - 1) * 31, 0.5, -13)
+    button.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    button.BorderSizePixel = 0
+    button.Parent = stealStopAtRow
+    corner(button, 6)
+    stroke(button, 1.2, COLORS.AccentSoft, 0.45)
+    stopAtButtons[percent] = button
+    button.MouseButton1Click:Connect(function()
+        Config.AutoStealStopAt = percent
+        refreshStopAtButtons()
+        saveConfig()
+        if Config.AutoSteal then
+            stopAutoStealSystem()
+            if os.clock() >= (Config._AutoStealHitPauseUntil or 0) then startAutoStealSystem() end
+        end
+    end)
+end
+refreshStopAtButtons()
+stealStopAtRow.Visible = Config.AutoStealMode ~= "Semi" and Config.AutoStealVersion == "V2"
 
 local stealRadiusRow = rowBase(combat, "Steal Radius", false)
 local _, _, setRad = numberBadge(stealRadiusRow, Config.AutoStealRadius, -60, 44, function(val)
@@ -2043,6 +2198,406 @@ keybindBadge(instaResetActionRow, Config.InstaResetKey, -60, 48, function(key)
     Config.InstaResetKey = key
 end)
 
+
+-- ============ PEAK HUB BAT SKIN ============
+local PEAK_BAT_SKIN_ASSETS = {
+    Scythe = "8699386664",
+    ["Ban Hammer"] = "14701192921",
+    ["Minecraft Sword"] = "minecraft_mesh",
+}
+-- Per-skin grip alignment, based on the actual asset proportions.
+local PEAK_BAT_SKIN_ADJUST = {
+    Scythe = {x = 0.09, y = -1, z = -0.8, rx = 0, ry = -90, rz = 0, size = 6},
+    ["Ban Hammer"] = {x = 0, y = -1, z = 0, rx = 0, ry = 180, rz = 0, size = 4},
+}
+local PEAK_BAT_SKIN_FOLDER = "PeakHubBatSkin"
+
+local function peakIsBatTool(tool)
+    if not tool or not tool:IsA("Tool") then return false end
+    local n = string.lower(tool.Name or "")
+    return string.find(n, "bat", 1, true) ~= nil or string.find(n, "slap", 1, true) ~= nil
+end
+
+local function peakGetHandle(tool)
+    return tool:FindFirstChild("Handle") or tool:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local PEAK_BAT_SKIN_ANIM_CONNECTIONS = setmetatable({}, {__mode = "k"})
+
+local function peakRestoreBatTool(tool)
+    if PEAK_BAT_SKIN_ANIM_CONNECTIONS[tool] then
+        pcall(function() PEAK_BAT_SKIN_ANIM_CONNECTIONS[tool]:Disconnect() end)
+        PEAK_BAT_SKIN_ANIM_CONNECTIONS[tool] = nil
+    end
+    local oldFolder = tool:FindFirstChild(PEAK_BAT_SKIN_FOLDER)
+    if oldFolder then pcall(function() oldFolder:Destroy() end) end
+    for _, obj in ipairs(tool:GetDescendants()) do
+        if obj:IsA("BasePart") and obj:GetAttribute("PeakHubBatSkinHidden") then
+            pcall(function()
+                obj.LocalTransparencyModifier = obj:GetAttribute("PeakHubOldLTM") or 0
+                obj.Transparency = obj:GetAttribute("PeakHubOldTransparency") or 0
+                obj.CastShadow = true
+                obj:SetAttribute("PeakHubBatSkinHidden", nil)
+                obj:SetAttribute("PeakHubOldLTM", nil)
+                obj:SetAttribute("PeakHubOldTransparency", nil)
+            end)
+        elseif obj:IsA("Sound") and obj.Name ~= "PeakBatSwingSound" then
+            pcall(function()
+                local oldVolume = obj:GetAttribute("PeakHubOldSoundVolume")
+                local oldSoundId = obj:GetAttribute("PeakHubOldSoundId")
+                if oldVolume ~= nil then obj.Volume = oldVolume end
+                if oldSoundId ~= nil then obj.SoundId = oldSoundId end
+                obj:SetAttribute("PeakHubOldSoundVolume", nil)
+                obj:SetAttribute("PeakHubOldSoundId", nil)
+            end)
+        end
+    end
+end
+
+local function peakMuteOriginalBatSounds(tool)
+    for _, obj in ipairs(tool:GetDescendants()) do
+        if obj:IsA("Sound") and obj.Name ~= "PeakBatSwingSound" then
+            if obj:GetAttribute("PeakHubOldSoundVolume") == nil then
+                obj:SetAttribute("PeakHubOldSoundVolume", obj.Volume)
+                obj:SetAttribute("PeakHubOldSoundId", obj.SoundId)
+            end
+            obj.Volume = 0
+            pcall(function() obj:Stop() end)
+        end
+    end
+end
+
+local function peakHideBatOriginal(tool)
+    for _, obj in ipairs(tool:GetDescendants()) do
+        if obj:IsA("BasePart") and not obj:GetAttribute("PeakHubBatSkinPart") then
+            if not obj:GetAttribute("PeakHubBatSkinHidden") then
+                obj:SetAttribute("PeakHubOldLTM", obj.LocalTransparencyModifier)
+                obj:SetAttribute("PeakHubOldTransparency", obj.Transparency)
+                obj:SetAttribute("PeakHubBatSkinHidden", true)
+            end
+            obj.LocalTransparencyModifier = 1
+            obj.Transparency = 1
+            obj.CastShadow = false
+        end
+    end
+end
+
+local function peakMakeSkinPart(parent, name, size, color, material)
+    local p = Instance.new("Part")
+    p.Name = name
+    p.Size = size
+    p.Color = color
+    p.Material = material or Enum.Material.Metal
+    p.Anchored = false
+    p.CanCollide = false
+    p.CanTouch = false
+    p.CanQuery = false
+    p.Massless = true
+    p:SetAttribute("PeakHubBatSkinPart", true)
+    p.Parent = parent
+    return p
+end
+
+local function peakWeldSkin(handle, part, offset)
+    part.CFrame = handle.CFrame * (offset or CFrame.new())
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = handle
+    weld.Part1 = part
+    weld.Parent = part
+end
+
+local PEAK_BAT_SKIN_CONNECTIONS = setmetatable({}, {__mode = "k"})
+local PEAK_BAT_SKIN_SOUNDS = {
+    Katana = "rbxassetid://111808555599832",
+    Scythe = "rbxassetid://137964779511233",
+    ["Ban Hammer"] = "rbxassetid://111808555599832",
+    ["Minecraft Sword"] = "rbxassetid://12222216",
+}
+
+local function peakSetupBatSkinEffects(tool, skin, folder)
+    if not tool or not folder or not folder.Parent then return end
+    local handle = peakGetHandle(tool)
+    if not handle then return end
+    if PEAK_BAT_SKIN_CONNECTIONS[tool] then
+        pcall(function() PEAK_BAT_SKIN_CONNECTIONS[tool]:Disconnect() end)
+        PEAK_BAT_SKIN_CONNECTIONS[tool] = nil
+    end
+
+    -- Place the swing trail on the longest visible skin part, not on the hidden handle.
+    local bestPart, bestAxis, bestLength = nil, "Y", 0
+    for _, obj in ipairs(folder:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local sz = obj.Size
+            local axis, length = "Y", sz.Y
+            if sz.X > length then axis, length = "X", sz.X end
+            if sz.Z > length then axis, length = "Z", sz.Z end
+            if length > bestLength then bestPart, bestAxis, bestLength = obj, axis, length end
+        end
+    end
+    if bestPart and bestLength > 0.5 then
+        local a0, a1 = Instance.new("Attachment"), Instance.new("Attachment")
+        a0.Name, a1.Name = "PeakBatTrailTop", "PeakBatTrailBottom"
+        local half = bestLength * 0.46
+        if bestAxis == "X" then
+            a0.Position, a1.Position = Vector3.new(-half, 0, 0), Vector3.new(half, 0, 0)
+        elseif bestAxis == "Z" then
+            a0.Position, a1.Position = Vector3.new(0, 0, -half), Vector3.new(0, 0, half)
+        else
+            a0.Position, a1.Position = Vector3.new(0, half, 0), Vector3.new(0, -half, 0)
+        end
+        a0.Parent, a1.Parent = bestPart, bestPart
+        local trail = Instance.new("Trail")
+        trail.Name = "PeakBatSwingTrail"
+        trail.Attachment0, trail.Attachment1 = a0, a1
+        trail.Color = ColorSequence.new(Color3.fromRGB(255, 180, 70), Color3.fromRGB(255, 95, 0))
+        trail.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.12), NumberSequenceKeypoint.new(1, 1)})
+        trail.Lifetime = 0.22
+        trail.LightEmission = 0.8
+        trail.Enabled = false
+        trail.Parent = folder
+    end
+
+    local swingSound = handle:FindFirstChild("PeakBatSwingSound")
+    if not swingSound then
+        swingSound = Instance.new("Sound")
+        swingSound.Name = "PeakBatSwingSound"
+        swingSound.Volume = 0.8
+        swingSound.PlaybackSpeed = 1
+        swingSound.Parent = handle
+    end
+    swingSound.SoundId = PEAK_BAT_SKIN_SOUNDS[skin] or "rbxassetid://111808555599832"
+
+    -- L'attivazione del tool arma una finestra breve; il suono parte solo
+    -- quando Roblox segnala l'avvio di un'animazione reale del personaggio.
+    local pendingSwingUntil = 0
+    local lastSkinSwingSound = 0
+    local char = tool.Parent
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local animator = hum and hum:FindFirstChildOfClass("Animator")
+    if animator then
+        PEAK_BAT_SKIN_ANIM_CONNECTIONS[tool] = animator.AnimationPlayed:Connect(function(track)
+            if not tool.Parent or tool.Parent ~= char or Config.BatSkin ~= skin then return end
+            local now = os.clock()
+            if now > pendingSwingUntil or now - lastSkinSwingSound < 0.22 then return end
+            local animationId = ""
+            pcall(function() animationId = track.Animation and track.Animation.AnimationId or "" end)
+            if animationId == "" then return end
+            lastSkinSwingSound = now
+            pendingSwingUntil = 0
+            pcall(function()
+                swingSound:Stop()
+                swingSound.TimePosition = 0
+                swingSound:Play()
+            end)
+        end)
+    end
+
+    PEAK_BAT_SKIN_CONNECTIONS[tool] = tool.Activated:Connect(function()
+        if not tool.Parent or Config.BatSkin ~= skin then return end
+        pendingSwingUntil = os.clock() + 0.45
+        local trail = folder:FindFirstChild("PeakBatSwingTrail", true)
+        if trail and trail:IsA("Trail") then
+            trail.Enabled = true
+            task.delay(0.24, function()
+                if trail and trail.Parent then trail.Enabled = false end
+            end)
+        end
+    end)
+end
+
+local function peakApplyBatSkin(tool)
+    if not peakIsBatTool(tool) then return end
+    local skin = Config.BatSkin or "Katana"
+    if PEAK_BAT_SKIN_CONNECTIONS[tool] then
+        pcall(function() PEAK_BAT_SKIN_CONNECTIONS[tool]:Disconnect() end)
+        PEAK_BAT_SKIN_CONNECTIONS[tool] = nil
+    end
+    peakRestoreBatTool(tool)
+    if skin == "None" then return end
+    peakMuteOriginalBatSounds(tool)
+    local handle = peakGetHandle(tool)
+    if not handle then return end
+
+    local folder = Instance.new("Folder")
+    folder.Name = PEAK_BAT_SKIN_FOLDER
+    folder.Parent = tool
+
+    if skin == "Minecraft Sword" then
+        peakHideBatOriginal(tool)
+        local swordPart = Instance.new("Part")
+        swordPart.Name = "PeakMinecraftSwordMesh"
+        swordPart.Size = Vector3.new(1, 1, 1)
+        swordPart.Transparency = 0
+        swordPart.Anchored = false
+        swordPart.CanCollide = false
+        swordPart.CanTouch = false
+        swordPart.CanQuery = false
+        swordPart.Massless = true
+        swordPart:SetAttribute("PeakHubBatSkinPart", true)
+        swordPart.Parent = folder
+        local mesh = Instance.new("SpecialMesh")
+        mesh.MeshType = Enum.MeshType.FileMesh
+        mesh.MeshId = "rbxassetid://8827558932"
+        mesh.TextureId = "rbxassetid://8827558969"
+        mesh.Scale = Vector3.new(0.2, 0.2, 0.2)
+        mesh.Parent = swordPart
+        local motor = Instance.new("Motor6D")
+        motor.Name = "PeakMinecraftSwordGrip"
+        motor.Part0 = handle
+        motor.Part1 = swordPart
+        motor.C0 = CFrame.new(-0.05, -0.1, -0.12)
+            * CFrame.Angles(math.rad(90), math.rad(180), math.rad(300))
+        motor.Parent = handle
+        peakSetupBatSkinEffects(tool, skin, folder)
+        return
+    end
+
+    if skin == "Katana" then
+        peakHideBatOriginal(tool)
+        local blade = peakMakeSkinPart(folder, "PeakKatanaBlade",
+            Vector3.new(0.19, 4.15, 0.065), Color3.fromRGB(205, 215, 225), Enum.Material.Metal)
+        peakWeldSkin(handle, blade, CFrame.new(0, 1.17, 0))
+        local edge = peakMakeSkinPart(folder, "PeakKatanaEdge",
+            Vector3.new(0.025, 4.05, 0.075), Color3.fromRGB(255, 120, 0), Enum.Material.Neon)
+        peakWeldSkin(handle, edge, CFrame.new(0.105, 1.15, -0.008))
+        local guard = peakMakeSkinPart(folder, "PeakKatanaGuard",
+            Vector3.new(0.78, 0.09, 0.27), Color3.fromRGB(35, 35, 35), Enum.Material.Metal)
+        peakWeldSkin(handle, guard, CFrame.new(0, -0.39, 0))
+        local grip = peakMakeSkinPart(folder, "PeakKatanaGrip",
+            Vector3.new(0.22, 0.82, 0.22), Color3.fromRGB(15, 15, 15), Enum.Material.SmoothPlastic)
+        peakWeldSkin(handle, grip, CFrame.new(0, -1.15, 0))
+        for i = 1, 5 do
+            local wrap = peakMakeSkinPart(folder, "PeakKatanaWrap" .. i,
+                Vector3.new(0.235, 0.035, 0.235),
+                i % 2 == 0 and Color3.fromRGB(255, 120, 0) or Color3.fromRGB(28, 28, 28),
+                Enum.Material.SmoothPlastic)
+            peakWeldSkin(handle, wrap, CFrame.new(0, -1.45 + i * 0.145, 0))
+        end
+        local pommel = peakMakeSkinPart(folder, "PeakKatanaPommel",
+            Vector3.new(0.27, 0.13, 0.27), Color3.fromRGB(255, 120, 0), Enum.Material.Metal)
+        peakWeldSkin(handle, pommel, CFrame.new(0, -1.59, 0))
+        -- Effects are connected below, after the skin has been built.
+        task.defer(function()
+            if tool and tool.Parent and folder and folder.Parent then
+                peakSetupBatSkinEffects(tool, skin, folder)
+            end
+        end)
+        return
+    end
+
+    local assetId = PEAK_BAT_SKIN_ASSETS[skin]
+    if not assetId then return end
+    local ok, objects = pcall(function()
+        return game:GetObjects("rbxassetid://" .. assetId)
+    end)
+    if not ok or not objects or not objects[1] then return end
+
+    local model = objects[1]
+    if model:IsA("BasePart") then
+        local wrapper = Instance.new("Model")
+        wrapper.Name = "PeakHubBatSkinModel"
+        model.Parent = wrapper
+        model = wrapper
+    end
+    model.Name = "PeakHubBatSkinAsset"
+    model.Parent = folder
+
+    local parts = {}
+    for _, obj in ipairs(model:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            table.insert(parts, obj)
+            obj.Anchored = false
+            obj.CanCollide = false
+            obj.CanTouch = false
+            obj.CanQuery = false
+            obj.Massless = true
+            obj:SetAttribute("PeakHubBatSkinPart", true)
+        elseif obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript")
+            or obj:IsA("ScreenGui") or obj:IsA("BillboardGui") then
+            pcall(function() obj:Destroy() end)
+        end
+    end
+    if #parts == 0 then pcall(function() model:Destroy() end); return end
+
+    local adjust = PEAK_BAT_SKIN_ADJUST[skin] or {x = 0, y = 0, z = -0.5, rx = 0, ry = 0, rz = 0, size = 5}
+    local bboxSize
+    local okBounds = pcall(function()
+        local _, size = model:GetBoundingBox()
+        bboxSize = size
+    end)
+    if okBounds and bboxSize then
+        local longest = math.max(bboxSize.X, bboxSize.Y, bboxSize.Z)
+        if longest > 0 then
+            pcall(function() model:ScaleTo(math.clamp((adjust.size or 5) / longest, 0.05, 8)) end)
+        end
+    end
+
+    -- Rotate long models so the weapon's long axis follows the handle direction.
+    local orient = CFrame.new()
+    local _, scaledSize = model:GetBoundingBox()
+    if scaledSize.X > scaledSize.Y and scaledSize.X > scaledSize.Z then
+        orient = CFrame.Angles(0, 0, math.rad(90))
+    elseif scaledSize.Z > scaledSize.Y and scaledSize.Z > scaledSize.X then
+        orient = CFrame.Angles(math.rad(90), 0, 0)
+    end
+    local desiredBox = handle.CFrame
+        * CFrame.new(adjust.x or 0, adjust.y or 0, adjust.z or 0)
+        * orient
+        * CFrame.Angles(math.rad(adjust.rx or 0), math.rad(adjust.ry or 0), math.rad(adjust.rz or 0))
+
+    -- Align the model's bounding-box center to the grip target, rather than
+    -- assuming the imported asset's pivot is at its handle.
+    local currentPivot = model:GetPivot()
+    local currentBox = select(1, model:GetBoundingBox())
+    local boxFromPivot = currentPivot:ToObjectSpace(currentBox)
+    pcall(function() model:PivotTo(desiredBox * boxFromPivot:Inverse()) end)
+
+    peakHideBatOriginal(tool)
+    for _, part in ipairs(parts) do
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = handle
+        weld.Part1 = part
+        weld.Parent = part
+    end
+    peakSetupBatSkinEffects(tool, skin, folder)
+end
+
+function applyPeakBatSkinToAll()
+    local containers = {}
+    if LP.Character then table.insert(containers, LP.Character) end
+    local backpack = LP:FindFirstChildOfClass("Backpack")
+    if backpack then table.insert(containers, backpack) end
+    for _, container in ipairs(containers) do
+        for _, tool in ipairs(container:GetChildren()) do
+            if peakIsBatTool(tool) then pcall(peakApplyBatSkin, tool) end
+        end
+    end
+end
+
+local function peakWatchBatContainer(container)
+    if not container then return end
+    container.ChildAdded:Connect(function(child)
+        if peakIsBatTool(child) then
+            task.wait(0.15)
+            pcall(peakApplyBatSkin, child)
+        end
+    end)
+end
+peakWatchBatContainer(LP:FindFirstChildOfClass("Backpack"))
+peakWatchBatContainer(LP.Character)
+LP.ChildAdded:Connect(function(child)
+    if child:IsA("Backpack") then peakWatchBatContainer(child) end
+end)
+LP.CharacterAdded:Connect(function(char)
+    task.wait(0.75)
+    peakWatchBatContainer(char)
+    pcall(applyPeakBatSkinToAll)
+end)
+task.defer(function()
+    task.wait(1)
+    pcall(applyPeakBatSkinToAll)
+end)
+
 local visual = makePage("Visual")
 
 
@@ -2069,33 +2624,48 @@ end)
 
 sectionLabel(visual, "VISUAL")
 toggleRow(visual, "Custom Animation", Config.CustomAnim, function(state)
-    Config.CustomAnim = state
-    if state then
-        Config.Unwalk = false
-        if type(stopUnwalk) == "function" then pcall(stopUnwalk) end
-        task.spawn(function()
-            if applyAnimPack then pcall(applyAnimPack, Config.AnimPack) end
-        end)
-    else
-        if restoreCharacterAnimations then pcall(restoreCharacterAnimations, LP.Character) end
-    end
-    saveConfig()
-end)
-cycleSelectorRow(visual, "Anim Pack", {"Adidas Sports","Adidas Community","Adidas Aura","Wicked Popular","Elder","Zombie","Mage","Catwalk Glam","Astronaut","Wicked Dancing Through Life","Werewolf","Superhero","Toy","No Boundaries","NFL","Amazon Unboxed","Vampire","Ninja","Robot","Levitation","Stylish","Bubbly","Cartoon"}, Config.AnimPack, function(mode)
-    Config.AnimPack = mode
-    if Config.CustomAnim then
-        task.spawn(function()
-            if applyAnimPack then pcall(applyAnimPack, mode) end
-        end)
-    end
-end)
-toggleRow(visual, "Unwalk", Config.Unwalk == true, function(state)
-    Config.Unwalk = state == true
-    if state then
+    if state and Config.AnimPack == "Unwalk" then
+        Config.Unwalk = true
         Config.CustomAnim = false
         if type(startUnwalk) == "function" then pcall(startUnwalk) end
     else
-        if type(stopUnwalk) == "function" then pcall(stopUnwalk) end
+        Config.CustomAnim = state
+        if state then
+            Config.Unwalk = false
+            if type(stopUnwalk) == "function" then pcall(stopUnwalk) end
+            task.spawn(function()
+                if applyAnimPack then pcall(applyAnimPack, Config.AnimPack) end
+            end)
+        else
+            if restoreCharacterAnimations then pcall(restoreCharacterAnimations, LP.Character) end
+        end
+    end
+    saveConfig()
+end)
+cycleSelectorRow(visual, "Anim Pack", {"Unwalk","Adidas Sports","Adidas Community","Adidas Aura","Wicked Popular","Elder","Zombie","Mage","Catwalk Glam","Astronaut","Wicked Dancing Through Life","Werewolf","Superhero","Toy","No Boundaries","NFL","Amazon Unboxed","Vampire","Ninja","Robot","Levitation","Stylish","Bubbly","Cartoon"}, Config.Unwalk and "Unwalk" or Config.AnimPack, function(mode)
+    if mode == "Unwalk" then
+        Config.AnimPack = "Unwalk"
+        Config.Unwalk = true
+        Config.CustomAnim = false
+        if type(startUnwalk) == "function" then pcall(startUnwalk) end
+    else
+        Config.AnimPack = mode
+        if Config.Unwalk then
+            Config.Unwalk = false
+            if type(stopUnwalk) == "function" then pcall(stopUnwalk) end
+        end
+        if Config.CustomAnim then
+            task.spawn(function()
+                if applyAnimPack then pcall(applyAnimPack, mode) end
+            end)
+        end
+    end
+    saveConfig()
+end)
+cycleSelectorRow(visual, "Bat Skin", {"Katana", "Minecraft Sword", "Scythe", "Ban Hammer", "None"}, Config.BatSkin, function(skin)
+    Config.BatSkin = skin
+    if applyPeakBatSkinToAll then
+        task.spawn(function() pcall(applyPeakBatSkinToAll) end)
     end
     saveConfig()
 end)
@@ -2142,6 +2712,212 @@ end
 
 sectionLabel(settings, "UI")
 
+-- Background selector: 12 slots. Background 1 is the default image; backgrounds 2-12 use supplied URLs.
+do
+    local BACKGROUND_URLS = {
+        [1] = "https://files.catbox.moe/sz7icy.png",
+        [2] = "https://files.catbox.moe/5341xz.png",
+        [3] = "https://files.catbox.moe/httilb.png",
+        [4] = "https://files.catbox.moe/tj68cq.png",
+        [5] = "https://files.catbox.moe/qozl8g.png",
+        [6] = "https://files.catbox.moe/9cpq91.jpeg",
+        [7] = "https://files.catbox.moe/pc73yz.jpeg",
+        [8] = "https://files.catbox.moe/ucw3ej.jpeg",
+        [9] = "https://files.catbox.moe/6mwr9m.png",
+        [10] = "https://files.catbox.moe/uu258w.jpeg",
+        [11] = "https://files.catbox.moe/lh97zw.png",
+        [12] = "https://files.catbox.moe/b2xyii.png",
+    }
+
+    -- Warm the local cache in the background so later selections can switch nearly instantly.
+    -- This never blocks UI creation and leaves the currently selected background untouched.
+    task.spawn(function()
+        for i = 1, 12 do
+            local url = BACKGROUND_URLS[i]
+            if url and not cachedBackgroundAsset(url) then
+                task.spawn(function()
+                    local data
+                    pcall(function() data = game:HttpGet(url) end)
+                    if not data or #data < 100 then
+                        pcall(function()
+                            local req = request or http_request or (syn and syn.request)
+                            if not req then return end
+                            local res = req({Url = url, Method = "GET"})
+                            if res then data = res.Body or res.body end
+                        end)
+                    end
+                    if data and #data > 100 and writefile then
+                        pcall(function() writefile(backgroundCacheFile(url), data) end)
+                    end
+                end)
+                task.wait(0.08)
+            end
+        end
+    end)
+
+    -- Each background has its own accent palette, applied across the main UI,
+    -- side buttons, toggles, rows, strokes, and overhead UI elements.
+    local BACKGROUND_THEMES = {
+        [1]  = {accent = Color3.fromRGB(255, 120, 0), soft = Color3.fromRGB(100, 35, 0)},
+        [2]  = {accent = Color3.fromRGB(255, 75, 75), soft = Color3.fromRGB(105, 25, 25)},
+        [3]  = {accent = Color3.fromRGB(255, 190, 55), soft = Color3.fromRGB(105, 70, 15)},
+        [4]  = {accent = Color3.fromRGB(70, 190, 255), soft = Color3.fromRGB(15, 65, 105)},
+        [5]  = {accent = Color3.fromRGB(190, 100, 255), soft = Color3.fromRGB(65, 25, 105)},
+        [6]  = {accent = Color3.fromRGB(255, 90, 165), soft = Color3.fromRGB(105, 25, 65)},
+        [7]  = {accent = Color3.fromRGB(70, 230, 160), soft = Color3.fromRGB(15, 85, 55)},
+        [8]  = {accent = Color3.fromRGB(80, 130, 255), soft = Color3.fromRGB(20, 40, 105)},
+        [9]  = {accent = Color3.fromRGB(235, 235, 245), soft = Color3.fromRGB(65, 65, 80)},
+        [10] = {accent = Color3.fromRGB(255, 215, 110), soft = Color3.fromRGB(100, 75, 25)},
+        [11] = {accent = Color3.fromRGB(110, 235, 95), soft = Color3.fromRGB(25, 85, 20)},
+        [12] = {accent = Color3.fromRGB(55, 220, 215), soft = Color3.fromRGB(15, 80, 80)},
+    }
+
+    local function isWarmAccent(c)
+        local r, g, b = math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5)
+        return r >= 95 and r > g * 1.22 and g >= b * 1.18 and b <= 115 and g <= 190
+    end
+    local function isColoredAccent(c)
+        local r, g, b = c.R, c.G, c.B
+        local hi = math.max(r, g, b)
+        local lo = math.min(r, g, b)
+        -- Treat saturated or clearly tinted colors as theme accents, but preserve black and white.
+        return hi > 0.16 and hi < 0.96 and (hi - lo) > 0.10
+    end
+    local function applyBackgroundTheme(index)
+        local theme = BACKGROUND_THEMES[index] or BACKGROUND_THEMES[1]
+        _G.PeakHubThemeAccent = theme.accent
+        _G.PeakHubThemeSoft = theme.soft
+        local oldAccent = COLORS.Accent
+        local oldSoft = COLORS.AccentSoft
+        COLORS.TabActive = theme.accent
+        COLORS.ToggleActive = theme.accent
+        COLORS.PurpleText = theme.accent
+        COLORS.TextDim = theme.accent
+        COLORS.Stroke = theme.accent
+        COLORS.Accent = theme.accent
+        COLORS.Success = theme.accent
+        COLORS.Red = theme.accent
+        COLORS.Blue = theme.accent
+        COLORS.AccentSoft = theme.soft
+        COLORS.Purple = theme.soft
+
+        -- Recolor existing GUI objects using their current accent colors.
+        -- White labels and black backgrounds are deliberately preserved.
+        local guiRoots = {screenGui}
+        local mobileGui = playerGui:FindFirstChild("VyzeMobileButtons")
+        if mobileGui then table.insert(guiRoots, mobileGui) end
+        for _, root in ipairs(guiRoots) do
+            for _, obj in ipairs(root:GetDescendants()) do
+                if obj:IsA("GuiObject") then
+                    pcall(function()
+                        local name = string.lower(obj.Name or "")
+                        local isToggle = name == "toggle" or name == "togglestroke" or name == "track"
+                        local isActiveSideButton = obj:IsA("TextButton") and obj.Parent == mobileGui and obj:GetAttribute("PeakHubActive") == true
+                        if obj:IsA("TextButton") or obj:IsA("ImageButton") then
+                            if isWarmAccent(obj.BackgroundColor3) or isColoredAccent(obj.BackgroundColor3) or obj.BackgroundColor3 == oldAccent or obj.BackgroundColor3 == oldSoft then
+                                obj.BackgroundColor3 = theme.accent
+                            end
+                        elseif isWarmAccent(obj.BackgroundColor3) or isColoredAccent(obj.BackgroundColor3) or obj.BackgroundColor3 == oldAccent or obj.BackgroundColor3 == oldSoft then
+                            obj.BackgroundColor3 = theme.soft
+                        end
+                        if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+                            if isWarmAccent(obj.TextColor3) or isColoredAccent(obj.TextColor3) or obj.TextColor3 == oldAccent or obj.TextColor3 == oldSoft then
+                                obj.TextColor3 = theme.accent
+                            end
+                        end
+                        if isToggle and obj:IsA("GuiObject") then
+                            local strokeObj = obj:FindFirstChildOfClass("UIStroke")
+                            if strokeObj then strokeObj.Color = theme.accent end
+                        end
+                        if name == "divider" then obj.BackgroundColor3 = theme.accent end
+                    end)
+                elseif obj:IsA("UIStroke") then
+                    pcall(function()
+                        if isWarmAccent(obj.Color) or isColoredAccent(obj.Color) or obj.Color == oldAccent or obj.Color == oldSoft then
+                            obj.Color = theme.accent
+                        end
+                    end)
+                end
+            end
+        end
+        -- Toggle tracks, active pills, and active side buttons follow the selected theme.
+        for _, obj in ipairs(screenGui:GetDescendants()) do
+            if obj:IsA("UIStroke") and obj.Parent and (obj.Parent.Name == "Toggle" or obj.Parent.Name == "Track" or obj.Parent.Name == "ToggleStroke") then
+                obj.Color = theme.accent
+            end
+        end
+        if mobileGui then
+            for _, btn in ipairs(mobileGui:GetChildren()) do
+                if btn:IsA("TextButton") then
+                    local st = btn:FindFirstChildOfClass("UIStroke")
+                    if btn:GetAttribute("PeakHubActive") == true then
+                        btn.BackgroundColor3 = theme.accent
+                        local activeGrad = btn:FindFirstChildOfClass("UIGradient")
+                        if activeGrad then activeGrad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, theme.soft), ColorSequenceKeypoint.new(1, theme.accent)}) end
+                        if st then st.Color = theme.accent end
+                    elseif st then
+                        st.Color = theme.accent
+                    end
+                    local topAccent = btn:FindFirstChild("OrangeAccent")
+                    if topAccent and topAccent:IsA("GuiObject") then topAccent.BackgroundColor3 = theme.accent end
+                end
+            end
+        end
+        if StealSys and StealSys.applyTheme then pcall(StealSys.applyTheme) end
+        -- If tabs already exist, refresh the selected tab's accent now, not on the next click.
+        if type(selectTab) == "function" then
+            task.defer(function()
+                pcall(function() selectTab(_G.PeakHubSelectedTab or "Movement") end)
+            end)
+        end
+    end
+
+    local row = rowBase(settings, "Background", false)
+    local valLbl = Instance.new("TextLabel")
+    valLbl.BackgroundTransparency = 1
+    valLbl.Size = UDim2.new(0, 42, 0, 22)
+    valLbl.Position = UDim2.new(1, -120, 0.5, -11)
+    valLbl.Font = Enum.Font.GothamBold
+    valLbl.TextSize = 13
+    valLbl.TextColor3 = COLORS.White
+    Config.UIBackgroundIndex = math.clamp(tonumber(Config.UIBackgroundIndex) or 1, 1, 12)
+    valLbl.Text = tostring(Config.UIBackgroundIndex)
+    valLbl.Parent = row
+    local function mkBackgroundArrow(txt, x)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0, 28, 0, 22)
+        b.Position = UDim2.new(1, x, 0.5, -11)
+        b.BackgroundColor3 = COLORS.Badge
+        b.BackgroundTransparency = 0.25
+        b.BorderSizePixel = 0
+        b.Text = txt
+        b.Font = Enum.Font.GothamBlack
+        b.TextSize = 14
+        b.TextColor3 = COLORS.White
+        b.Parent = row
+        corner(b, 6)
+        return b
+    end
+    local function setBackgroundIndex(n)
+        Config.UIBackgroundIndex = math.clamp(tonumber(n) or 1, 1, 12)
+        valLbl.Text = tostring(Config.UIBackgroundIndex)
+        applyBackgroundTheme(Config.UIBackgroundIndex)
+        local url = BACKGROUND_URLS[Config.UIBackgroundIndex]
+        if url then
+            applyUIBackground(url)
+        else
+            Config.UIBackgroundUrl = ""
+            if uiBgImage then uiBgImage.Image = ""; uiBgImage.Visible = false end
+            if uiBgDim then uiBgDim.BackgroundColor3 = Color3.fromRGB(0, 0, 0); uiBgDim.BackgroundTransparency = 0 end
+            main.BackgroundTransparency = 0
+            main.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        end
+        saveConfig()
+    end
+    mkBackgroundArrow("<", -156).MouseButton1Click:Connect(function() setBackgroundIndex(math.max(1, Config.UIBackgroundIndex - 1)) end)
+    mkBackgroundArrow(">", -64).MouseButton1Click:Connect(function() setBackgroundIndex(math.min(12, Config.UIBackgroundIndex + 1)) end)
+    setBackgroundIndex(Config.UIBackgroundIndex)
+end
 
 do
     local row = rowBase(settings, "UI Scale", false)
@@ -2186,6 +2962,7 @@ end
 
 
 do
+    Config.StealBarSize = math.clamp(tonumber(Config.StealBarSize) or 50, 35, 90)
     local row = rowBase(settings, "Steal Bar Size", false)
     local valLbl = Instance.new("TextLabel")
     valLbl.BackgroundTransparency = 1
@@ -2215,13 +2992,13 @@ do
     local left = mkArr("<", -156)
     local right = mkArr(">", -64)
     left.MouseButton1Click:Connect(function()
-        Config.StealBarSize = math.clamp((Config.StealBarSize or 50) - 5, 20, 90)
+        Config.StealBarSize = math.clamp((Config.StealBarSize or 50) - 5, 35, 90)
         valLbl.Text = tostring(Config.StealBarSize)
         if StealSys and StealSys.applyBarSize then StealSys.applyBarSize() end
         saveConfig()
     end)
     right.MouseButton1Click:Connect(function()
-        Config.StealBarSize = math.clamp((Config.StealBarSize or 50) + 5, 20, 90)
+        Config.StealBarSize = math.clamp((Config.StealBarSize or 50) + 5, 35, 90)
         valLbl.Text = tostring(Config.StealBarSize)
         if StealSys and StealSys.applyBarSize then StealSys.applyBarSize() end
         saveConfig()
@@ -2517,6 +3294,8 @@ end
 
 startBatAimbot=function()
     if safeModeTryStart and not safeModeTryStart() then return end
+    -- Equipaggiamento iniziale singolo; mai forzato di nuovo durante il loop.
+    pcall(peakEquipBatOnce)
     if Conns.aimbot then Conns.aimbot:Disconnect(); Conns.aimbot=nil end
     mirrorTPActive=true
     table.clear(mirrorTPPreviousY)
@@ -2534,11 +3313,9 @@ startBatAimbot=function()
         if not root or not hum or hum.Health<=0 then return end
 
         hum.AutoRotate=false
-        local bat=findBat()
-        if bat and bat.Parent~=char then
-            pcall(function() hum:EquipTool(bat) end)
-        end
-
+        -- Non forzare l'equipaggiamento ogni frame: il player può usare
+        -- un altro Tool. La mazza viene equipaggiata solo all'attivazione;
+        -- Auto Swing riparte quando la mazza è equipaggiata manualmente.
         local target=getClosestTarget()
         if not target then
             _aimbotTarget=nil
@@ -2547,26 +3324,54 @@ startBatAimbot=function()
         end
         _aimbotTarget=target
 
-        -- Prediction Envy solo per l'inseguimento; la rotazione guarda la posizione reale
-        -- del target, così la prediction non fa invertire la direzione avanti/indietro.
+        -- Prediction adattiva per inseguire la traiettoria del target.
+        -- La logica di movimento/bypass Peak resta invariata: si aggiornano solo
+        -- il punto d'inseguimento e la direzione dello sguardo.
         local actualTargetPos=target.Position
         local predictedPos=getEnvyPredictedPosition(target)
-        local chasePos=predictedPos
+
+        -- Stima la direzione in cui il target si sta muovendo; se è quasi fermo,
+        -- usa la direzione del suo personaggio come fallback stabile.
+        local targetVelocity=target.AssemblyLinearVelocity
+        local targetMoveForward=Vector3.new(targetVelocity.X,0,targetVelocity.Z)
+        if targetMoveForward.Magnitude>1.5 then
+            targetMoveForward=targetMoveForward.Unit
+        else
+            targetMoveForward=Vector3.new(target.CFrame.LookVector.X,0,target.CFrame.LookVector.Z)
+            if targetMoveForward.Magnitude>0.001 then
+                targetMoveForward=targetMoveForward.Unit
+            else
+                targetMoveForward=Vector3.zero
+            end
+        end
+
+        local frontOffset=2.5
+        local frontTargetPos=predictedPos+targetMoveForward*frontOffset
+        local chasePos=frontTargetPos
         local actualDelta=actualTargetPos-root.Position
         local actualFlat=Vector3.new(actualDelta.X,0,actualDelta.Z)
+        local predictedDelta=predictedPos-root.Position
+        local predictedFlat=Vector3.new(predictedDelta.X,0,predictedDelta.Z)
         local moveDelta=chasePos-root.Position
         local moveFlat=Vector3.new(moveDelta.X,0,moveDelta.Z)
         local actualDistance=actualDelta.Magnitude
 
-        -- Vicino al target usa la sua posizione reale, evitando che la prediction
-        -- superi il target e faccia oscillare la direzione a ogni frame.
+        -- Vicino al target riduce l'offset, ma continua a usare la prediction
+        -- per anticiparne il movimento ed evitare cambi bruschi avanti/indietro.
         if actualFlat.Magnitude < 9 then
-            moveFlat=actualFlat
-            chasePos=actualTargetPos
+            local nearOffset=math.clamp(actualFlat.Magnitude/9,0.35,1) * frontOffset
+            chasePos=predictedPos+targetMoveForward*nearOffset
+            moveDelta=chasePos-root.Position
+            moveFlat=Vector3.new(moveDelta.X,0,moveDelta.Z)
         end
 
-        if actualFlat.Magnitude > 0.05 then
-            local desiredCF=CFrame.lookAt(root.Position, root.Position+actualFlat.Unit)
+        -- Guarda verso il punto previsto, cioè dove il target sta andando.
+        local lookDelta=Vector3.new(chasePos.X-root.Position.X,0,chasePos.Z-root.Position.Z)
+        if lookDelta.Magnitude < 0.05 then
+            lookDelta=predictedFlat
+        end
+        if lookDelta.Magnitude > 0.05 then
+            local desiredCF=CFrame.lookAt(root.Position, root.Position+lookDelta.Unit)
             local alpha=1-math.exp(-math.clamp(dt,0,0.1)*12)
             root.CFrame=root.CFrame:Lerp(desiredCF,alpha)
         end
@@ -2884,36 +3689,6 @@ UserInputService.InputBegan:Connect(function(input, gp)
     if not (isKb or isPad) then return end
     local keyName = input.KeyCode.Name
 
-    if keyMatches(Config.CustomSpeedKey, keyName) then
-        customSpeedEnabled = not customSpeedEnabled
-        if customSpeedEnabled then
-            customCarryEnabled = false
-            carrySpeedEnabled = false
-            laggerModeEnabled = false
-            laggerCarryEnabled = false
-        end
-        if mobBtnRefs.customSpeed then pcall(mobBtnRefs.customSpeed, customSpeedEnabled) end
-        if mobBtnRefs.customCarry then pcall(mobBtnRefs.customCarry, customCarryEnabled) end
-        if mobBtnRefs.carrySpeed then pcall(mobBtnRefs.carrySpeed, false) end
-        if mobBtnRefs.lagger then pcall(mobBtnRefs.lagger, false) end
-        if mobBtnRefs.laggerCarry then pcall(mobBtnRefs.laggerCarry, false) end
-        return
-    end
-    if keyMatches(Config.CustomCarryKey, keyName) then
-        customCarryEnabled = not customCarryEnabled
-        if customCarryEnabled then
-            customSpeedEnabled = false
-            carrySpeedEnabled = false
-            laggerModeEnabled = false
-            laggerCarryEnabled = false
-        end
-        if mobBtnRefs.customCarry then pcall(mobBtnRefs.customCarry, customCarryEnabled) end
-        if mobBtnRefs.customSpeed then pcall(mobBtnRefs.customSpeed, customSpeedEnabled) end
-        if mobBtnRefs.carrySpeed then pcall(mobBtnRefs.carrySpeed, false) end
-        if mobBtnRefs.lagger then pcall(mobBtnRefs.lagger, false) end
-        if mobBtnRefs.laggerCarry then pcall(mobBtnRefs.laggerCarry, false) end
-        return
-    end
 end)
 
 
@@ -3132,28 +3907,102 @@ end
 
 startBatCounter = function()
     if batCounterConn then return end
+    batCounterWasRagdoll = false
     batCounterDebounce = false
+    local lastTrigger = 0
+
     batCounterConn = RunService.Heartbeat:Connect(function()
-        if not Config.BatCounter then return end
-        if batCounterDebounce then return end
+        if not Config.BatCounter then
+            batCounterWasRagdoll = false
+            return
+        end
+        -- Match VX7: don't counter while Bat TP / smart Bat TP is controlling movement.
+        if Config.BatTP or Config._smartBatTpDriving or Config._instaResetInProgress then
+            batCounterWasRagdoll = false
+            return
+        end
+
         local char = LP.Character
-        if not char then return end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hum then return end
-        local ragdolledNow = counterIsRagdoll(hum)
-        if ragdolledNow and not batCounterWasRagdoll then
-            brieflyFaceNearestPlayer(char, 0.1)
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not char or not hum then return end
+        local ragdolledNow = hum:GetState() == Enum.HumanoidStateType.Physics
+        if not (ragdolledNow and not batCounterWasRagdoll) then
+            batCounterWasRagdoll = ragdolledNow
+            return
         end
-        batCounterWasRagdoll = ragdolledNow
-        if ragdolledNow then
-            batCounterDebounce = true
-            task.spawn(function()
-                local bat = findBatForCounter()
-                if bat then swingBatForCounter(bat, char) end
-                task.wait(0.5)
+        batCounterWasRagdoll = true
+        if batCounterDebounce or os.clock() - lastTrigger < 0.1 then return end
+        lastTrigger = os.clock()
+        batCounterDebounce = true
+
+        task.spawn(function()
+            local function release()
                 batCounterDebounce = false
+            end
+            local ok, err = pcall(function()
+                if not Config.BatCounter or Config.BatTP or Config._smartBatTpDriving then return end
+                local currentChar = LP.Character
+                local root = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
+                local currentHum = currentChar and currentChar:FindFirstChildOfClass("Humanoid")
+                if not currentChar or not root or not currentHum then return end
+
+                -- VX7-style target selection: nearest living opponent is required.
+                local targetRoot, bestDistance = nil, math.huge
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= LP and player.Character then
+                        local otherRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                        local otherHum = player.Character:FindFirstChildOfClass("Humanoid")
+                        if otherRoot and otherHum and otherHum.Health > 0 then
+                            local distance = (otherRoot.Position - root.Position).Magnitude
+                            if distance < bestDistance then
+                                bestDistance, targetRoot = distance, otherRoot
+                            end
+                        end
+                    end
+                end
+                if not targetRoot then return end
+
+                local bat = findBatForCounter()
+                if not bat then return end
+                if bat.Parent ~= currentChar then
+                    pcall(function() currentHum:EquipTool(bat) end)
+                    task.wait(0.015)
+                end
+                if not Config.BatCounter or Config.BatTP or Config._smartBatTpDriving or Config._instaResetInProgress then return end
+                currentChar = LP.Character
+                root = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
+                currentHum = currentChar and currentChar:FindFirstChildOfClass("Humanoid")
+                if not root or not currentHum or not targetRoot.Parent then return end
+
+                -- Briefly face the target, then swing once using the equipped bat.
+                local targetPos = targetRoot.Position
+                local flatTarget = Vector3.new(targetPos.X, root.Position.Y, targetPos.Z)
+                if (flatTarget - root.Position).Magnitude > 0.001 then
+                    currentHum.AutoRotate = false
+                    root.CFrame = CFrame.lookAt(root.Position, flatTarget)
+                end
+                task.wait(0.02)
+                if bat.Parent == currentChar then
+                    pcall(function()
+                        bat:Activate()
+                        local remote = bat:FindFirstChildWhichIsA("RemoteEvent")
+                        if remote then remote:FireServer() end
+                    end)
+                else
+                    swingBatForCounter(bat, currentChar)
+                end
+                task.wait(0.2)
+                if root and root.Parent then
+                    pcall(function()
+                        root.RotVelocity = Vector3.zero
+                        root.AssemblyAngularVelocity = Vector3.zero
+                    end)
+                end
+                if currentHum and currentHum.Parent then currentHum.AutoRotate = true end
             end)
-        end
+            if not ok then warn("[Peak Hub] Bat Counter:", err) end
+            release()
+        end)
     end)
 end
 
@@ -3165,7 +4014,6 @@ stopBatCounter = function()
     batCounterDebounce = false
     batCounterWasRagdoll = false
 end
-
 
 local MEDUSA_COOLDOWN = 25
 local medConns = {}
@@ -3485,7 +4333,7 @@ do
     spGui.Parent = playerGui
 
     local function stealBarWidth()
-        local s = math.clamp(tonumber(Config.StealBarSize) or 50, 20, 90)
+        local s = math.clamp(tonumber(Config.StealBarSize) or 50, 35, 90)
         return math.floor(s * 6)
     end
     local barW = stealBarWidth()
@@ -3509,7 +4357,19 @@ do
     corner(card, 12)
     stroke(card, 1.2, COLORS.Stroke, 0.35)
     StealSys.progressGui = spGui
-
+    -- Keep every accent in the Steal progress bar synchronized with the selected UI background.
+    local function applyStealBarTheme()
+        local accent = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
+        local soft = _G.PeakHubThemeSoft or accent
+        local cardStroke = card:FindFirstChildOfClass("UIStroke")
+        if cardStroke then cardStroke.Color = accent end
+        if StealSys.progressFill then StealSys.progressFill.BackgroundColor3 = accent end
+        if StealSys.modeLabel then StealSys.modeLabel.TextColor3 = accent end
+        if StealSys.radiusLabel then StealSys.radiusLabel.TextColor3 = accent end
+        if StealSys.discordLabel then StealSys.discordLabel.TextColor3 = Color3.fromRGB(255, 255, 255) end
+    end
+    StealSys.applyTheme = applyStealBarTheme
+    applyStealBarTheme()
 
     do
         local dragging, dragStart, startPos
@@ -3551,7 +4411,7 @@ do
     end
 
     function StealSys.applyBarSize()
-        local s = math.clamp(tonumber(Config.StealBarSize) or 50, 20, 90)
+        local s = math.clamp(tonumber(Config.StealBarSize) or 50, 35, 90)
         local scale = s / 50
         local w = math.floor(s * 6)
         local h = math.floor(52 * scale)
@@ -3650,7 +4510,7 @@ do
     radLbl.Position = UDim2.new(0.68, 0, 0, 4)
     radLbl.BackgroundTransparency = 1
     radLbl.Text = "Radius: 61"
-    radLbl.TextColor3 = Color3.fromRGB(255, 180, 80)
+    radLbl.TextColor3 = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 180, 80)
     radLbl.Font = Enum.Font.GothamBold
     radLbl.TextSize = 11
     radLbl.TextXAlignment = Enum.TextXAlignment.Right
@@ -3674,7 +4534,7 @@ do
     fill.Name = "ProgressFill"
     fill.Size = UDim2.new(0, 0, 1, 0)
     fill.Position = UDim2.new(0, 0, 0, 0)
-    fill.BackgroundColor3 = Color3.fromRGB(255, 120, 0)
+    fill.BackgroundColor3 = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
     fill.BorderSizePixel = 0
     fill.ZIndex = 5
     fill.Parent = track
@@ -3723,11 +4583,13 @@ end
 
 refreshStealBarMeta = function()
     StealSys.refreshMeta()
+    if StealSys.applyTheme then pcall(StealSys.applyTheme) end
 end
 
 function updateStealProgress(progress, label)
     local f = math.clamp(tonumber(progress) or 0, 0, 1)
     if StealSys.progressFill then
+        StealSys.progressFill.BackgroundColor3 = _G.PeakHubThemeAccent or COLORS.Accent or StealSys.progressFill.BackgroundColor3
         TweenService:Create(StealSys.progressFill, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             Size = UDim2.new(f, 0, 1, 0)
         }):Play()
@@ -3976,12 +4838,13 @@ function executeStealV2(prompt, animalData)
     StealSys.stealStart = tick()
 
 
-    local duration = 1.3
-    local threshold = 0.75
-    local nearDist = 10
-    local timeToThreshold = duration * threshold
-    local timeAfterThreshold = duration - timeToThreshold
-    local waitNearMax = 4
+    local duration = 1.35
+    local stopAtPercent = tonumber(Config.AutoStealStopAt) or 75
+    local threshold = math.clamp(stopAtPercent, 75, 95) / 100
+    local nearDist = threshold >= 0.80 and 7 or 9.3
+    local timeToThreshold = math.max(0.05, duration * threshold)
+    local timeAfterThreshold = math.max(0.05, duration - timeToThreshold)
+    local waitNearMax = 1.6
 
     StealSys.totalDuration = duration
     updateStealProgress(0, "0%")
@@ -4163,6 +5026,7 @@ startAutoStealSystem = function()
     resetStealProgress()
     StealSys.conn = RunService.Heartbeat:Connect(function()
         if not Config.AutoSteal then return end
+        if os.clock() < (Config._AutoStealHitPauseUntil or 0) then return end
         if StealSys.isStealing then return end
 
 
@@ -4226,6 +5090,90 @@ stopAutoStealSystem = function()
     resetStealProgress()
 end
 
+-- VX7-style Ragdoll Steal: pause Auto Steal when a hit, ragdoll, or knockdown is detected.
+Config._AutoStealHitPauseUntil = Config._AutoStealHitPauseUntil or 0
+Config._AutoStealHitToken = Config._AutoStealHitToken or 0
+Config._AutoStealLastRagdoll = false
+Config._AutoStealLastHealth = nil
+
+local function isAutoStealCharacterRagdolled()
+    local character = LP.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return false end
+    local now = workspace:GetServerTimeNow()
+    local ragdollEnd = LP:GetAttribute("RagdollEndTime") or character:GetAttribute("RagdollEndTime") or humanoid:GetAttribute("RagdollEndTime")
+    if type(ragdollEnd) == "number" and ragdollEnd > now then return true end
+    if LP:GetAttribute("Ragdolled") == true or LP:GetAttribute("Ragdoll") == true
+        or character:GetAttribute("Ragdolled") == true or character:GetAttribute("Ragdoll") == true
+        or humanoid:GetAttribute("Ragdolled") == true or humanoid:GetAttribute("Ragdoll") == true then
+        return true
+    end
+    local state = humanoid:GetState()
+    return humanoid.PlatformStand or state == Enum.HumanoidStateType.Physics
+        or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown
+end
+
+local function triggerAutoStealHitPause()
+    if not Config.AutoStealStopWhenHit or not Config.AutoSteal then return end
+    if os.clock() < (Config._AutoStealHitPauseUntil or 0) then return end
+    local pause = math.clamp(tonumber(Config.AutoStealHitPauseSeconds) or 1.3, 0.1, 30)
+    Config._AutoStealHitPauseUntil = os.clock() + pause
+    Config._AutoStealHitToken = Config._AutoStealHitToken + 1
+    local token = Config._AutoStealHitToken
+    stopAutoStealSystem()
+    task.delay(pause, function()
+        if token ~= Config._AutoStealHitToken then return end
+        Config._AutoStealHitPauseUntil = 0
+        if Config.AutoSteal and Config.AutoStealStopWhenHit then startAutoStealSystem() end
+    end)
+end
+
+local function bindAutoStealHitSignals(character)
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    Config._AutoStealLastHealth = humanoid.Health
+    humanoid.HealthChanged:Connect(function(health)
+        local previous = Config._AutoStealLastHealth
+        Config._AutoStealLastHealth = health
+        if previous and health < previous then triggerAutoStealHitPause() end
+    end)
+    humanoid.StateChanged:Connect(function(_, newState)
+        if newState == Enum.HumanoidStateType.Physics or newState == Enum.HumanoidStateType.Ragdoll
+            or newState == Enum.HumanoidStateType.FallingDown then
+            triggerAutoStealHitPause()
+        end
+    end)
+    humanoid:GetPropertyChangedSignal("PlatformStand"):Connect(function()
+        if humanoid.PlatformStand then triggerAutoStealHitPause() end
+    end)
+    for _, object in ipairs({LP, character, humanoid}) do
+        for _, attribute in ipairs({"RagdollEndTime", "Ragdolled", "Ragdoll"}) do
+            object:GetAttributeChangedSignal(attribute):Connect(function()
+                if isAutoStealCharacterRagdolled() then triggerAutoStealHitPause() end
+            end)
+        end
+    end
+end
+
+if not Config._AutoStealHitMonitorStarted then
+    Config._AutoStealHitMonitorStarted = true
+    RunService.Heartbeat:Connect(function()
+        if not Config.AutoStealStopWhenHit or not Config.AutoSteal then
+            Config._AutoStealLastRagdoll = false
+            return
+        end
+        local ragdolled = isAutoStealCharacterRagdolled()
+        if ragdolled and not Config._AutoStealLastRagdoll then triggerAutoStealHitPause() end
+        Config._AutoStealLastRagdoll = ragdolled
+    end)
+    LP.CharacterAdded:Connect(function(character)
+        Config._AutoStealLastRagdoll = false
+        task.delay(0.1, function() bindAutoStealHitSignals(character) end)
+    end)
+    task.defer(function()
+        if LP.Character then bindAutoStealHitSignals(LP.Character) end
+    end)
+end
 
 if Config.AutoSteal then
     task.defer(function()
@@ -4484,8 +5432,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
                 laggerSpeedEnabled = false
                 laggerCarryEnabled = false
                 laggerModeEnabled = false
-                customSpeedEnabled = false
-                customCarryEnabled = false
             end
             lastCarryKeyTime = now
         end
@@ -4497,8 +5443,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
             else
                 if mobBtnRefs.lagger then pcall(mobBtnRefs.lagger, false) end
                 if mobBtnRefs.laggerCarry then pcall(mobBtnRefs.laggerCarry, false) end
-                if mobBtnRefs.customSpeed then pcall(mobBtnRefs.customSpeed, false) end
-                if mobBtnRefs.customCarry then pcall(mobBtnRefs.customCarry, false) end
             end
         end
 
@@ -4526,6 +5470,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
             Config.BatAimbot = not Config.BatAimbot
             State.autoBatToggled = Config.BatAimbot
             if Config.BatAimbot then startBatAimbot() else stopBatAimbot() end
+            if mobBtnRefs and mobBtnRefs.autoBat then pcall(mobBtnRefs.autoBat, Config.BatAimbot) end
+            if _G.PeakHubSetBatAimbotUI then pcall(_G.PeakHubSetBatAimbotUI, Config.BatAimbot) end
             saveConfig()
         end
 
@@ -4578,8 +5524,10 @@ local TAB_ACCENTS = {
 }
 
 function selectTab(name)
-    if currentTab == name then return end
     currentTab = name
+    _G.PeakHubSelectedTab = name
+    local liveAccent = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
+    local liveSoft = _G.PeakHubThemeSoft or COLORS.AccentSoft or Color3.fromRGB(100, 35, 0)
 
     for tabName, data in pairs(tabButtons) do
         local active = tabName == name
@@ -4587,18 +5535,18 @@ function selectTab(name)
         local info = TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
         TweenService:Create(data.button, info, {
 
-            BackgroundColor3 = active and Color3.fromRGB(92, 38, 0) or Color3.fromRGB(0, 0, 0),
+            BackgroundColor3 = active and liveSoft or Color3.fromRGB(0, 0, 0),
             BackgroundTransparency = active and 0 or 0.12,
         }):Play()
         TweenService:Create(data.stroke, info, {
             Transparency = active and 0 or 0.48,
-            Color = active and Color3.fromRGB(255, 145, 35) or Color3.fromRGB(135, 55, 0),
+            Color = active and liveAccent or liveSoft,
             Thickness = active and 2 or 1,
         }):Play()
         TweenService:Create(data.underline, info, {
             BackgroundTransparency = active and 0 or 1,
             Size = active and UDim2.new(0.72, 0, 0, 2) or UDim2.new(0, 0, 0, 2),
-            BackgroundColor3 = Color3.fromRGB(255, 165, 65),
+            BackgroundColor3 = liveAccent,
         }):Play()
         TweenService:Create(data.label, info, {
             TextColor3 = active and COLORS.White or COLORS.TextDim,
@@ -4607,6 +5555,7 @@ function selectTab(name)
         if data.glow then
             TweenService:Create(data.glow, info, {
                 BackgroundTransparency = active and 0.75 or 1,
+            BackgroundColor3 = liveAccent,
             }):Play()
         end
         pages[tabName].Visible = active
@@ -4616,7 +5565,8 @@ end
 
 for i, name in ipairs(tabNames) do
     local active0 = (name == currentTab)
-    local accent = TAB_ACCENTS[name] or COLORS.Stroke
+    local accent = _G.PeakHubThemeAccent or TAB_ACCENTS[name] or COLORS.Stroke
+    local themeSoft = _G.PeakHubThemeSoft or COLORS.AccentSoft or Color3.fromRGB(100, 35, 0)
 
     local btn = Instance.new("TextButton")
     btn.Name = name
@@ -4630,7 +5580,7 @@ for i, name in ipairs(tabNames) do
     btn.Parent = tabBar
     corner(btn, 11)
 
-    local tabStroke = stroke(btn, active0 and 2 or 1, active0 and Color3.fromRGB(255, 145, 35) or Color3.fromRGB(135, 55, 0), active0 and 0 or 0.48)
+    local tabStroke = stroke(btn, active0 and 2 or 1, active0 and accent or themeSoft, active0 and 0 or 0.48)
 
 
     local glow = Instance.new("Frame")
@@ -4669,7 +5619,7 @@ for i, name in ipairs(tabNames) do
     underline.AnchorPoint = Vector2.new(0.5, 0)
     underline.Position = UDim2.new(0.5, 0, 1, -7)
     underline.Size = active0 and UDim2.new(0.72, 0, 0, 2) or UDim2.new(0, 0, 0, 2)
-    underline.BackgroundColor3 = Color3.fromRGB(255, 165, 65)
+    underline.BackgroundColor3 = accent
     underline.BackgroundTransparency = active0 and 0 or 1
     underline.BorderSizePixel = 0
     underline.ZIndex = 3
@@ -4685,7 +5635,7 @@ for i, name in ipairs(tabNames) do
         }):Play()
         TweenService:Create(tabStroke, TweenInfo.new(0.12), {
             Transparency = 0.18,
-            Color = Color3.fromRGB(255, 145, 35),
+            Color = _G.PeakHubThemeAccent or COLORS.Accent,
             Thickness = 1.4,
         }):Play()
     end)
@@ -4697,7 +5647,7 @@ for i, name in ipairs(tabNames) do
         }):Play()
         TweenService:Create(tabStroke, TweenInfo.new(0.15), {
             Transparency = 0.48,
-            Color = Color3.fromRGB(135, 55, 0),
+            Color = _G.PeakHubThemeSoft or COLORS.AccentSoft,
             Thickness = 1.25,
         }):Play()
     end)
@@ -4706,6 +5656,15 @@ for i, name in ipairs(tabNames) do
         selectTab(name)
     end)
 end
+-- Apply the selected background palette to the initially selected tab immediately.
+-- Defer one extra refresh so the first rendered frame cannot keep stale tab colors.
+selectTab(currentTab)
+task.defer(function()
+    task.wait()
+    pcall(function()
+        selectTab(currentTab)
+    end)
+end)
 
 
 function __vyzeInitVisualLogic()
@@ -4743,70 +5702,118 @@ function cursedInstaReset()
     if resetting then return end
     local character = LP.Character
     if not character then return end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
     local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not hrp or not humanoid then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not hrp then return end
 
     resetting = true
     _isInstaResetting = true
+    Config._instaResetInProgress = true
     local prevAntiDie = antiDieActive
     antiDieActive = false
 
+    local camera = workspace.CurrentCamera
+    local savedCameraType = camera and camera.CameraType
+    local savedCameraCFrame = camera and camera.CFrame
     pcall(function()
-        local cam = workspace.CurrentCamera
-        if cam then
-            cam.CameraType = Enum.CameraType.Scriptable
-            local savedCFrame = cam.CFrame
-            cam.CFrame = savedCFrame
+        if camera then
+            camera.CameraType = Enum.CameraType.Scriptable
+            if savedCameraCFrame then camera.CFrame = savedCameraCFrame end
         end
-
-        hrp.AssemblyLinearVelocity = Vector3.new(0, 3e6, 0)
     end)
 
     local respawnConn
-    respawnConn = LP.CharacterAdded:Connect(function(newChar)
-        task.wait(0.1)
+    local finished = false
+    local function finishReset(newChar)
+        if finished then return end
+        finished = true
         pcall(function()
             local cam = workspace.CurrentCamera
             if cam then
                 cam.CameraType = Enum.CameraType.Custom
-                local hum = newChar:FindFirstChildOfClass("Humanoid")
-                if hum then
-                    cam.CameraSubject = hum
-                end
+                local newHum = newChar and newChar:FindFirstChildOfClass("Humanoid")
+                if newHum then cam.CameraSubject = newHum end
             end
         end)
         antiDieActive = prevAntiDie
         _isInstaResetting = false
-        resetting = false
-        if respawnConn then
-            respawnConn:Disconnect()
-            respawnConn = nil
-        end
-    end)
-
-
-    task.delay(8, function()
-        if not resetting then return end
-        pcall(function()
-            local cam = workspace.CurrentCamera
-            if cam then
-                cam.CameraType = Enum.CameraType.Custom
-                local char = LP.Character
-                local hum = char and char:FindFirstChildOfClass("Humanoid")
-                if hum then cam.CameraSubject = hum end
-            end
-        end)
-        antiDieActive = prevAntiDie
-        _isInstaResetting = false
+        Config._instaResetInProgress = false
         resetting = false
         if respawnConn then
             pcall(function() respawnConn:Disconnect() end)
             respawnConn = nil
         end
+    end
+
+    respawnConn = LP.CharacterAdded:Connect(function(newChar)
+        task.spawn(function()
+            local deadline = os.clock() + 8
+            local newHum
+            repeat
+                newHum = newChar:FindFirstChildOfClass("Humanoid")
+                if newHum then break end
+                task.wait(0.05)
+            until os.clock() >= deadline
+            finishReset(newChar)
+        end)
+    end)
+
+    -- Instant Reset V2: fisica / stato Physics, con tentativi ripetuti
+    -- un frame alla volta finché il personaggio muore o scade la finestra.
+    task.spawn(function()
+        local savedPlatformStand = humanoid.PlatformStand
+        local savedBreakJoints = humanoid.BreakJointsOnDeath
+        local deadline = os.clock() + 0.3
+
+        local function applyV2(hum, root)
+            hum.BreakJointsOnDeath = true
+            hum.PlatformStand = true
+            hum:ChangeState(Enum.HumanoidStateType.Physics)
+            root.AssemblyAngularVelocity = Vector3.zero
+            root.AssemblyLinearVelocity = Vector3.new(0, 1e6, 0)
+        end
+
+        -- Burst limitato e poi un tentativo per frame: evita un ciclo
+        -- enorme nello stesso frame e lascia avanzare la fisica.
+        for _ = 1, 8 do
+            local ch = LP.Character
+            if ch ~= character or not character.Parent or humanoid.Health <= 0 then
+                finishReset(LP.Character)
+                return
+            end
+            local root = ch:FindFirstChild("HumanoidRootPart")
+            local hum = ch:FindFirstChildOfClass("Humanoid")
+            if root and hum then pcall(applyV2, hum, root) end
+        end
+
+        while os.clock() < deadline do
+            RunService.Heartbeat:Wait()
+            local ch = LP.Character
+            if ch ~= character or not character.Parent or humanoid.Health <= 0 then
+                return -- CharacterAdded si occupa del ripristino camera/stato
+            end
+            local root = ch:FindFirstChild("HumanoidRootPart")
+            local hum = ch:FindFirstChildOfClass("Humanoid")
+            if root and hum then pcall(applyV2, hum, root) end
+        end
+
+        -- Se V2 non ha causato il reset, ripristina lo stato originale.
+        if LP.Character == character and character.Parent and humanoid.Health > 0 then
+            pcall(function()
+                humanoid.PlatformStand = savedPlatformStand
+                humanoid.BreakJointsOnDeath = savedBreakJoints
+                humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+                local root = character:FindFirstChild("HumanoidRootPart")
+                if root then root.AssemblyLinearVelocity = Vector3.zero end
+            end)
+            finishReset(character)
+        end
+    end)
+
+    task.delay(8, function()
+        if resetting then finishReset(LP.Character) end
     end)
 end
-
 
 local MOB_POS_FILE = "VyzeCC2_MobPos.json"
 local mobGuiRef = nil
@@ -4848,11 +5855,12 @@ function buildMobileButtons()
     destroyMobileButtons()
 
 
-    local OFF_BG = Color3.fromRGB(0, 0, 0)
+    local OFF_BG = Color3.fromRGB(18, 18, 20)
     local OFF_TXT = Color3.fromRGB(255, 255, 255)
-    local ON_BG = Color3.fromRGB(105, 42, 0)
+    local ON_BG = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
     local ON_TXT = Color3.fromRGB(255, 255, 255)
-    local OUTLINE = Color3.fromRGB(255, 145, 25)
+    local OUTLINE = _G.PeakHubThemeAccent or Color3.fromRGB(255, 145, 25)
+    local ACCENT = _G.PeakHubThemeAccent or Color3.fromRGB(255, 177, 76)
 
     local scale = math.clamp((tonumber(Config.MobileButtonSize) or 50) / 50, 0.2, 2.5)
     local BTN_W = math.floor(64 * scale)
@@ -4886,13 +5894,11 @@ function buildMobileButtons()
         {key="carrySpeed",   label="CARRY\nSPEED",   toggle=true,  col=2, row=2},
         {key="laggerCarry",  label="LAGGER\nCARRY",  toggle=true,  col=1, row=3},
         {key="lagger",       label="LAGGER\nMODE",   toggle=true,  col=2, row=3},
-        {key="customSpeed",  label="CUSTOM\nSPEED",  toggle=true,  col=1, row=4},
-        {key="customCarry",  label="CUSTOM\nCARRY",  toggle=true,  col=2, row=4},
     }
 
     local function defaultPos(def)
         local cols = 3
-        local rows = 5
+        local rows = 4
         local gridW = cols * (BTN_W + GAP) - GAP
         local gridH = rows * (BTN_H + GAP) - GAP
         local margin = 16
@@ -4904,21 +5910,34 @@ function buildMobileButtons()
 
     local function setBtnVisual(btn, on)
         local st = btn:FindFirstChildOfClass("UIStroke")
+        local grad = btn:FindFirstChildOfClass("UIGradient")
         if on then
-            btn.BackgroundColor3 = ON_BG
+            btn:SetAttribute("PeakHubActive", true)
+            btn.BackgroundColor3 = _G.PeakHubThemeAccent or OUTLINE
             btn.TextColor3 = ON_TXT
+            btn.TextStrokeColor3 = Color3.fromRGB(255, 218, 160)
+            btn.TextStrokeTransparency = 0.18
+            if grad then
+                grad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, _G.PeakHubThemeSoft or (_G.PeakHubThemeAccent or OUTLINE)), ColorSequenceKeypoint.new(1, _G.PeakHubThemeAccent or OUTLINE)})
+            end
             if st then
-                st.Color = OUTLINE
-                st.Thickness = 3.5
+                st.Color = _G.PeakHubThemeAccent or OUTLINE
+                st.Thickness = 3
                 st.Transparency = 0
             end
         else
+            btn:SetAttribute("PeakHubActive", false)
             btn.BackgroundColor3 = OFF_BG
             btn.TextColor3 = OFF_TXT
+            btn.TextTransparency = 0
+            btn.TextStrokeTransparency = 1
+            if grad then
+                grad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1, OFF_BG)})
+            end
             if st then
-                st.Color = OUTLINE
-                st.Thickness = 1.6
-                st.Transparency = 0.2
+                st.Color = _G.PeakHubThemeAccent or OUTLINE
+                st.Thickness = 1.8
+                st.Transparency = 0.05
             end
         end
     end
@@ -4965,14 +5984,38 @@ function buildMobileButtons()
         btn.Position = pos
         btn.BackgroundColor3 = OFF_BG
         btn.TextColor3 = OFF_TXT
+        btn.TextTransparency = 0
         btn.Font = Enum.Font.GothamBlack
         btn.TextSize = math.max(10, math.floor(12 * scale))
-        btn.Text = def.label
+        btn.TextStrokeTransparency = 1
+        btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        btn.TextScaled = false
         btn.TextWrapped = true
+        btn.Text = def.label
+        btn.TextXAlignment = Enum.TextXAlignment.Center
+        btn.TextYAlignment = Enum.TextYAlignment.Center
         btn.AutoButtonColor = false
         btn.BorderSizePixel = 0
         btn.Parent = gui
         corner(btn, cornerR)
+
+        local gradient = Instance.new("UIGradient")
+        gradient.Rotation = 90
+        gradient.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+            ColorSequenceKeypoint.new(1, OFF_BG),
+        })
+        gradient.Parent = btn
+
+        local topAccent = Instance.new("Frame")
+        topAccent.Name = "OrangeAccent"
+        topAccent.Size = UDim2.new(0.52, 0, 0, math.max(3, math.floor(4 * scale)))
+        topAccent.Position = UDim2.new(0, math.floor(9 * scale), 0, math.floor(7 * scale))
+        topAccent.BackgroundColor3 = _G.PeakHubThemeAccent or OUTLINE
+        topAccent.BorderSizePixel = 0
+        topAccent.ZIndex = btn.ZIndex + 1
+        topAccent.Parent = btn
+        corner(topAccent, math.max(2, math.floor(2 * scale)))
 
         local st = Instance.new("UIStroke")
         st.Color = OUTLINE
@@ -5061,12 +6104,8 @@ function buildMobileButtons()
                 if carrySpeedEnabled then
                     laggerModeEnabled = false
                     laggerCarryEnabled = false
-                    customSpeedEnabled = false
-                    customCarryEnabled = false
                     if mobBtnRefs.lagger then mobBtnRefs.lagger(false) end
                     if mobBtnRefs.laggerCarry then mobBtnRefs.laggerCarry(false) end
-                    if mobBtnRefs.customSpeed then mobBtnRefs.customSpeed(false) end
-                    if mobBtnRefs.customCarry then mobBtnRefs.customCarry(false) end
                 else
 
                     carrySpeedEnabled = false
@@ -5078,12 +6117,8 @@ function buildMobileButtons()
                 if laggerModeEnabled then
                     carrySpeedEnabled = false
                     laggerCarryEnabled = false
-                    customSpeedEnabled = false
-                    customCarryEnabled = false
                     if mobBtnRefs.carrySpeed then mobBtnRefs.carrySpeed(false) end
                     if mobBtnRefs.laggerCarry then mobBtnRefs.laggerCarry(false) end
-                    if mobBtnRefs.customSpeed then mobBtnRefs.customSpeed(false) end
-                    if mobBtnRefs.customCarry then mobBtnRefs.customCarry(false) end
                 end
                 setVisual(laggerModeEnabled)
             elseif def.key == "laggerCarry" then
@@ -5092,40 +6127,10 @@ function buildMobileButtons()
                 if laggerCarryEnabled then
                     carrySpeedEnabled = false
                     laggerModeEnabled = false
-                    customSpeedEnabled = false
-                    customCarryEnabled = false
                     if mobBtnRefs.carrySpeed then mobBtnRefs.carrySpeed(false) end
                     if mobBtnRefs.lagger then mobBtnRefs.lagger(false) end
-                    if mobBtnRefs.customSpeed then mobBtnRefs.customSpeed(false) end
-                    if mobBtnRefs.customCarry then mobBtnRefs.customCarry(false) end
                 end
                 setVisual(laggerCarryEnabled)
-            elseif def.key == "customSpeed" then
-                customSpeedEnabled = not customSpeedEnabled
-                if customSpeedEnabled then
-                    customCarryEnabled = false
-                    carrySpeedEnabled = false
-                    laggerModeEnabled = false
-                    laggerCarryEnabled = false
-                    if mobBtnRefs.customCarry then mobBtnRefs.customCarry(false) end
-                    if mobBtnRefs.carrySpeed then mobBtnRefs.carrySpeed(false) end
-                    if mobBtnRefs.lagger then mobBtnRefs.lagger(false) end
-                    if mobBtnRefs.laggerCarry then mobBtnRefs.laggerCarry(false) end
-                end
-                setVisual(customSpeedEnabled)
-            elseif def.key == "customCarry" then
-                customCarryEnabled = not customCarryEnabled
-                if customCarryEnabled then
-                    customSpeedEnabled = false
-                    carrySpeedEnabled = false
-                    laggerModeEnabled = false
-                    laggerCarryEnabled = false
-                    if mobBtnRefs.customSpeed then mobBtnRefs.customSpeed(false) end
-                    if mobBtnRefs.carrySpeed then mobBtnRefs.carrySpeed(false) end
-                    if mobBtnRefs.lagger then mobBtnRefs.lagger(false) end
-                    if mobBtnRefs.laggerCarry then mobBtnRefs.laggerCarry(false) end
-                end
-                setVisual(customCarryEnabled)
             end
         end)
     end
@@ -5134,6 +6139,38 @@ function buildMobileButtons()
     if Config.AutoLeft and mobBtnRefs.autoLeft then mobBtnRefs.autoLeft(true) end
     if Config.AutoRight and mobBtnRefs.autoRight then mobBtnRefs.autoRight(true) end
     if Config.BatAimbot and mobBtnRefs.autoBat then mobBtnRefs.autoBat(true) end
+
+    -- Keep active side buttons orange even if another UI refresh reapplies the selected palette.
+    task.spawn(function()
+        while gui and gui.Parent do
+            for _, btn in ipairs(gui:GetChildren()) do
+                if btn:IsA("TextButton") then
+                    local st = btn:FindFirstChildOfClass("UIStroke")
+                    local grad = btn:FindFirstChildOfClass("UIGradient")
+                    local topAccent = btn:FindFirstChild("OrangeAccent")
+                    if btn:GetAttribute("PeakHubActive") == true then
+                        btn.BackgroundColor3 = _G.PeakHubThemeAccent or OUTLINE
+                        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                        if grad then
+                            grad.Color = ColorSequence.new({
+                                ColorSequenceKeypoint.new(0, _G.PeakHubThemeSoft or (_G.PeakHubThemeAccent or OUTLINE)),
+                                ColorSequenceKeypoint.new(1, _G.PeakHubThemeAccent or OUTLINE)
+                            })
+                        end
+                        if st then
+                            st.Color = _G.PeakHubThemeAccent or OUTLINE
+                            st.Thickness = 3
+                            st.Transparency = 0
+                        end
+                    else
+                        if st then st.Color = _G.PeakHubThemeAccent or OUTLINE end
+                        if topAccent then topAccent.BackgroundColor3 = _G.PeakHubThemeAccent or OUTLINE end
+                    end
+                end
+            end
+            task.wait(0.15)
+        end
+    end)
 
     _G.__VyzeRefreshSafeModeMobileVisuals = function()
         local locked = Config.SafeMode and safeModeIsLocked()
@@ -5894,50 +6931,93 @@ LP.CharacterAdded:Connect(function(char)
 end)
 
 
-local antiLagState = { conn = nil, active = false }
+-- Anti Lag: processing in batches to avoid a single long frame; original settings are cached and restored.
+local antiLagState = { conn = nil, active = false, cache = {}, lighting = nil, effects = {} }
+
+local function peakCacheProperty(instance, property)
+    local entry = antiLagState.cache[instance]
+    if not entry then entry = {}; antiLagState.cache[instance] = entry end
+    if entry[property] == nil then
+        local ok, value = pcall(function() return instance[property] end)
+        if ok then entry[property] = value end
+    end
+end
 
 function _applyAntiLagObj(instance)
+    if not antiLagState.active then return end
     pcall(function()
-        if instance:IsA("ParticleEmitter") then
+        if instance:IsA("ParticleEmitter") or instance:IsA("Trail") or instance:IsA("Beam") or instance:IsA("Fire") or instance:IsA("Smoke") or instance:IsA("Sparkles") then
+            peakCacheProperty(instance, "Enabled")
             instance.Enabled = false
-        elseif instance:IsA("Decal") then
+        elseif instance:IsA("Decal") or instance:IsA("Texture") then
+            peakCacheProperty(instance, "Transparency")
             instance.Transparency = 1
         elseif instance:IsA("BasePart") then
+            peakCacheProperty(instance, "Material")
+            peakCacheProperty(instance, "Reflectance")
+            peakCacheProperty(instance, "CastShadow")
             instance.Material = Enum.Material.Plastic
             instance.Reflectance = 0
             instance.CastShadow = false
+        elseif instance:IsA("PostEffect") then
+            peakCacheProperty(instance, "Enabled")
+            instance.Enabled = false
         end
     end)
 end
 
 enableAntiLag = function()
+    if antiLagState.active then return end
     antiLagState.active = true
+    antiLagState.cache = {}
+    antiLagState.lighting = {
+        GlobalShadows = Lighting.GlobalShadows,
+        FogEnd = Lighting.FogEnd,
+        Brightness = Lighting.Brightness,
+        EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
+        EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
+    }
+    for _, child in ipairs(Lighting:GetChildren()) do
+        if child:IsA("PostEffect") then
+            antiLagState.effects[child] = child.Enabled
+            pcall(function() child.Enabled = false end)
+        end
+    end
     Lighting.GlobalShadows = false
     Lighting.FogEnd = 9e9
     Lighting.Brightness = 1
     Lighting.EnvironmentDiffuseScale = 0
     Lighting.EnvironmentSpecularScale = 0
-    for _, child in pairs(Lighting:GetChildren()) do
-        if child:IsA("BloomEffect") or child:IsA("BlurEffect") or child:IsA("SunRaysEffect") then
-            pcall(function() child.Enabled = false end)
-        end
-    end
-    for _, descendant in pairs(workspace:GetDescendants()) do
-        _applyAntiLagObj(descendant)
-    end
     if antiLagState.conn then antiLagState.conn:Disconnect() end
     antiLagState.conn = workspace.DescendantAdded:Connect(function(descendant)
-        if antiLagState.active then
-            _applyAntiLagObj(descendant)
+        if antiLagState.active then _applyAntiLagObj(descendant) end
+    end)
+    task.spawn(function()
+        local descendants = workspace:GetDescendants()
+        for i = 1, #descendants do
+            if not antiLagState.active then break end
+            _applyAntiLagObj(descendants[i])
+            if i % 180 == 0 then task.wait() end
         end
     end)
 end
 
 disableAntiLag = function()
     antiLagState.active = false
-    if antiLagState.conn then
-        antiLagState.conn:Disconnect()
-        antiLagState.conn = nil
+    if antiLagState.conn then antiLagState.conn:Disconnect(); antiLagState.conn = nil end
+    for instance, properties in pairs(antiLagState.cache) do
+        if instance and instance.Parent then
+            for property, value in pairs(properties) do pcall(function() instance[property] = value end) end
+        end
+    end
+    table.clear(antiLagState.cache)
+    for effect, enabled in pairs(antiLagState.effects) do
+        if effect and effect.Parent then pcall(function() effect.Enabled = enabled end) end
+    end
+    table.clear(antiLagState.effects)
+    if antiLagState.lighting then
+        for property, value in pairs(antiLagState.lighting) do pcall(function() Lighting[property] = value end) end
+        antiLagState.lighting = nil
     end
 end
 
@@ -6062,7 +7142,7 @@ function ensureOverheadLabels(char)
         lbl.Position = UDim2.new(0, 0, 0, y)
         lbl.BackgroundTransparency = 1
         lbl.Text = text
-        lbl.TextColor3 = OVERHEAD_PURPLE
+        lbl.TextColor3 = _G.PeakHubThemeAccent or OVERHEAD_PURPLE
         lbl.Font = Enum.Font.GothamBlack
         lbl.TextSize = size
         lbl.TextStrokeTransparency = 0.25
@@ -6081,9 +7161,9 @@ function ensureOverheadLabels(char)
 
     local div = Instance.new("Frame")
     div.Name = "Divider"
-    div.Size = UDim2.new(0, 90, 0, 1)
-    div.Position = UDim2.new(0.5, -45, 0, 48)
-    div.BackgroundColor3 = Color3.fromRGB(255, 180, 80)
+    div.Size = UDim2.new(0, 120, 0, 1)
+    div.Position = UDim2.new(0.5, -60, 0, 48)
+    div.BackgroundColor3 = _G.PeakHubThemeAccent or Color3.fromRGB(255, 180, 80)
     div.BackgroundTransparency = 0.25
     div.BorderSizePixel = 0
     div.Parent = bb
@@ -6095,7 +7175,7 @@ end
 function updateOverheadSpeedText()
     if overheadSpeed then
         overheadSpeed.Text = "Speed: " .. formatSpeedNum(getActiveSpeed())
-        overheadSpeed.TextColor3 = OVERHEAD_PURPLE
+        overheadSpeed.TextColor3 = _G.PeakHubThemeAccent or OVERHEAD_PURPLE
     end
 end
 
@@ -6107,7 +7187,12 @@ local OVERHEAD_RAGDOLL_SECONDS = 2.6
 RunService.RenderStepped:Connect(function()
     ensureOverheadLabels(LP.Character)
     updateOverheadSpeedText()
-    if overheadDiscord then overheadDiscord.TextColor3 = OVERHEAD_PURPLE end
+    if overheadDiscord then overheadDiscord.TextColor3 = _G.PeakHubThemeAccent or OVERHEAD_PURPLE end
+    if overheadSpeed then overheadSpeed.TextColor3 = _G.PeakHubThemeAccent or OVERHEAD_PURPLE end
+    if overheadDiscord and overheadDiscord.Parent then
+        local dividerObj = overheadDiscord.Parent:FindFirstChild("Divider")
+        if dividerObj then dividerObj.BackgroundColor3 = _G.PeakHubThemeAccent or OVERHEAD_PURPLE end
+    end
 
     local char = LP.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -6139,7 +7224,7 @@ RunService.RenderStepped:Connect(function()
 
             overheadRagdoll.Visible = true
             overheadRagdoll.Text = string.format("%.1f", left)
-            overheadRagdoll.TextColor3 = OVERHEAD_PURPLE
+            overheadRagdoll.TextColor3 = _G.PeakHubThemeAccent or OVERHEAD_PURPLE
         else
 
             overheadRagdoll.Visible = false
@@ -6199,11 +7284,13 @@ function playVyzeIntro()
     local Sg = game:GetService("StarterGui")
     local pg = LP:WaitForChild("PlayerGui")
     local D = 3.2
-    local Silver1 = Color3.fromRGB(255, 180, 80)
-    local Silver2 = Color3.fromRGB(255, 180, 80)
-    local Silver3 = Color3.fromRGB(255, 120, 0)
-    local Silver4 = Color3.fromRGB(100, 35, 0)
-    local Purple = Color3.fromRGB(255, 120, 0)
+    local introAccent = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
+    local introSoft = _G.PeakHubThemeSoft or COLORS.AccentSoft or Color3.fromRGB(100, 35, 0)
+    local Silver1 = introAccent
+    local Silver2 = introAccent
+    local Silver3 = introAccent
+    local Silver4 = introSoft
+    local Purple = introAccent
 
     local introBlur
     local function tn(i, t, st, dr, pr2)
@@ -6259,11 +7346,11 @@ function playVyzeIntro()
     local skipBtn = Instance.new("TextButton", gui)
     skipBtn.Size = UDim2.new(0, 130, 0, 38)
     skipBtn.Position = UDim2.new(1, -160, 0, 20)
-    skipBtn.BackgroundColor3 = Color3.fromRGB(255, 180, 80)
+    skipBtn.BackgroundColor3 = introAccent
     skipBtn.BackgroundTransparency = 0.85
     skipBtn.BorderSizePixel = 0
     skipBtn.Text = "SKIP INTRO"
-    skipBtn.TextColor3 = Color3.fromRGB(255, 180, 80)
+    skipBtn.TextColor3 = introAccent
     skipBtn.TextTransparency = 1
     skipBtn.Font = Enum.Font.GothamBold
     skipBtn.TextSize = 13
@@ -6271,7 +7358,7 @@ function playVyzeIntro()
     skipBtn.AutoButtonColor = false
     Instance.new("UICorner", skipBtn).CornerRadius = UDim.new(1, 0)
     local skipStroke = Instance.new("UIStroke", skipBtn)
-    skipStroke.Color = Color3.fromRGB(255, 180, 80)
+    skipStroke.Color = introAccent
     skipStroke.Thickness = 1
     skipStroke.Transparency = 1
     task.delay(0.4, function()
@@ -6371,21 +7458,21 @@ function playVyzeIntro()
     peakTitle.Position = UDim2.new(0.5, 0, 0.5, 0)
     peakTitle.BackgroundTransparency = 1
     peakTitle.Text = "PEAK HUB"
-    peakTitle.TextColor3 = Color3.fromRGB(255, 180, 80)
+    peakTitle.TextColor3 = introAccent
     peakTitle.Font = Enum.Font.GothamBlack
     peakTitle.TextScaled = true
     peakTitle.TextTransparency = 1
     peakTitle.ZIndex = 15
     peakTitle.TextStrokeTransparency = 0.45
-    peakTitle.TextStrokeColor3 = Color3.fromRGB(100, 35, 0)
+    peakTitle.TextStrokeColor3 = introSoft
     local peakTitleConstraint = Instance.new("UITextSizeConstraint", peakTitle)
     peakTitleConstraint.MaxTextSize = 76
     peakTitleConstraint.MinTextSize = 24
     local peakTitleGradient = Instance.new("UIGradient", peakTitle)
     peakTitleGradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 210, 130)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 120, 0)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 210, 130)),
+        ColorSequenceKeypoint.new(0, introAccent:Lerp(Color3.fromRGB(255, 255, 255), 0.28)),
+        ColorSequenceKeypoint.new(0.5, introAccent),
+        ColorSequenceKeypoint.new(1, introAccent:Lerp(Color3.fromRGB(255, 255, 255), 0.28)),
     })
 
 
@@ -6530,3 +7617,23 @@ end)
 if Config.BatAimbot and not Config.SafeMode then
     startBatAimbot()
 end
+
+
+-- Keep interactive controls tappable on touch devices; decorative layers never intercept input.
+local function peakMakeGuiClickable(obj)
+    if not obj or not obj:IsA("GuiObject") then return end
+    if obj:IsA("GuiButton") then
+        obj.Active = true
+        obj.Selectable = true
+    elseif obj:IsA("TextBox") then
+        obj.Active = true
+        obj.Selectable = true
+    elseif obj.Name == "UIBackground" or obj.Name == "UIBackgroundDim" then
+        obj.Active = false
+        obj.Selectable = false
+    end
+end
+for _, guiObject in ipairs(screenGui:GetDescendants()) do peakMakeGuiClickable(guiObject) end
+screenGui.DescendantAdded:Connect(function(guiObject)
+    task.defer(function() pcall(peakMakeGuiClickable, guiObject) end)
+end)

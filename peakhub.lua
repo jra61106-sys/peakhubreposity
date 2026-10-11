@@ -179,10 +179,36 @@ function corner(parent, radius)
     return c
 end
 
+local function peakHubAccentColor()
+    return _G.PeakHubThemeAccent or COLORS.Stroke or COLORS.Accent or Color3.fromRGB(255, 120, 0)
+end
+
+local function peakHubSoftColor()
+    return _G.PeakHubThemeSoft or COLORS.AccentSoft or COLORS.Purple or Color3.fromRGB(100, 35, 0)
+end
+
+local function peakHubIsAccentTone(color)
+    if typeof(color) ~= "Color3" then return false end
+    if color == COLORS.Stroke or color == COLORS.Accent or color == COLORS.ToggleActive
+        or color == COLORS.TabActive or color == COLORS.Success or color == COLORS.Red
+        or color == COLORS.Blue or color == _G.PeakHubThemeAccent or color == _G.PeakHubThemeSoft
+        or color == COLORS.AccentSoft or color == COLORS.Purple then
+        return true
+    end
+    local r, g, b = color.R * 255, color.G * 255, color.B * 255
+    -- Catch legacy orange/dark-orange accent constants so they follow every theme.
+    return r >= 95 and r > g * 1.22 and g >= b * 1.18 and b <= 115 and g <= 190
+end
+
 function stroke(parent, thickness, color, transparency)
     local s = Instance.new("UIStroke")
     s.Thickness = thickness or 1
-    s.Color = color or COLORS.Stroke
+    local requestedColor = color or COLORS.Stroke
+    local isThemeAccent = peakHubIsAccentTone(requestedColor)
+    s.Color = isThemeAccent and peakHubAccentColor() or requestedColor
+    if isThemeAccent then
+        s:SetAttribute("PeakHubThemeAccentStroke", true)
+    end
     s.Transparency = transparency or 0
     s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     s.Parent = parent
@@ -705,12 +731,14 @@ function rowBase(parent, labelText, accent)
     row:SetAttribute("GlowOn", false)
     row.MouseEnter:Connect(function()
         if row:GetAttribute("GlowOn") then return end
-        TweenService:Create(row, TweenInfo.new(0.12), {BackgroundColor3 = Color3.fromRGB(100, 35, 0)}):Play()
+        TweenService:Create(row, TweenInfo.new(0.12), {BackgroundColor3 = peakHubSoftColor()}):Play()
+        rowStroke.Color = peakHubAccentColor()
         TweenService:Create(rowStroke, TweenInfo.new(0.12), {Transparency = 0.15}):Play()
     end)
     row.MouseLeave:Connect(function()
         if row:GetAttribute("GlowOn") then return end
         TweenService:Create(row, TweenInfo.new(0.15), {BackgroundColor3 = COLORS.Row}):Play()
+        rowStroke.Color = peakHubAccentColor()
         TweenService:Create(rowStroke, TweenInfo.new(0.15), {Transparency = 0.45}):Play()
     end)
 
@@ -724,20 +752,24 @@ local function setRowGlow(row, enabled)
     if not st then return end
     local info = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     if enabled then
+        st.Color = peakHubAccentColor()
+        st:SetAttribute("PeakHubThemeAccentStroke", true)
         TweenService:Create(st, info, {
             Transparency = 0,
             Thickness = 3,
-            Color = Color3.fromRGB(255, 120, 0),
+            Color = peakHubAccentColor(),
         }):Play()
         TweenService:Create(row, info, {
-            BackgroundColor3 = Color3.fromRGB(100, 35, 0),
+            BackgroundColor3 = peakHubSoftColor(),
             BackgroundTransparency = 0.08,
         }):Play()
     else
+        st.Color = peakHubAccentColor()
+        st:SetAttribute("PeakHubThemeAccentStroke", true)
         TweenService:Create(st, info, {
             Transparency = 0.45,
             Thickness = 1.2,
-            Color = COLORS.Stroke,
+            Color = peakHubAccentColor(),
         }):Play()
         TweenService:Create(row, info, {
             BackgroundColor3 = Color3.fromRGB(0, 0, 0),
@@ -1062,7 +1094,7 @@ function toggleWithNumberRow(parent, labelText, defaultOn, initialVal, onToggle,
     track.BorderSizePixel = 0
     track.Parent = row
     corner(track, 12)
-    stroke(track, 1, Color3.fromRGB(255, 120, 0), 0.4)
+    local toggleStroke = stroke(track, 1.5, peakHubAccentColor(), 0)
 
     local knob = Instance.new("Frame")
     knob.Size = UDim2.new(0, 18, 0, 18)
@@ -1072,23 +1104,36 @@ function toggleWithNumberRow(parent, labelText, defaultOn, initialVal, onToggle,
     knob.Parent = track
     corner(knob, 9)
 
-    local on = defaultOn
-    setRowGlow(row, defaultOn == true)
-    track.MouseButton1Click:Connect(function()
-        on = not on
+    local on = defaultOn == true
+    local function setVisual(state)
+        on = state == true
         local info = TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
         TweenService:Create(knob, info, {
             Position = on and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
             BackgroundColor3 = COLORS.White,
         }):Play()
-        TweenService:Create(track, info, {
-            BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-            BackgroundTransparency = 0,
-        }):Play()
-        setRowGlow(row, on)
-        if onToggle then
-            onToggle(on)
+        track.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        track.BackgroundTransparency = 0
+
+        local accent = peakHubAccentColor()
+        toggleStroke.Color = accent
+        toggleStroke.Thickness = on and 2 or 1.5
+        toggleStroke.Transparency = 0
+        toggleStroke:SetAttribute("PeakHubThemeAccentStroke", true)
+
+        local rowStroke = row:FindFirstChild("RowStroke") or row:FindFirstChildOfClass("UIStroke")
+        if rowStroke then
+            rowStroke.Color = accent
+            rowStroke.Transparency = 0.25
+            rowStroke.Thickness = on and 1.6 or 1.2
+            rowStroke:SetAttribute("PeakHubThemeAccentStroke", true)
         end
+    end
+
+    setVisual(on)
+    track.MouseButton1Click:Connect(function()
+        setVisual(not on)
+        if onToggle then onToggle(on) end
         saveConfig()
     end)
 
@@ -1100,15 +1145,12 @@ function toggleWithNumberRow(parent, labelText, defaultOn, initialVal, onToggle,
     end
 
     numberBadge(row, initialVal, -60, 44, function(val)
-        if onChanged then
-            onChanged(val)
-        end
+        if onChanged then onChanged(val) end
         saveConfig()
     end)
 
     return row
 end
-
 
 function cycleSelectorRow(parent, labelText, options, currentValue, onChanged)
     local row = rowBase(parent, labelText, false)
@@ -1175,6 +1217,8 @@ function cycleSelectorRow(parent, labelText, options, currentValue, onChanged)
     }
 end
 
+_G.__PeakHubModeButtonRefreshers = _G.__PeakHubModeButtonRefreshers or {}
+
 function modeButtonsRow(parent, options, currentOption, onSelected)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 50)
@@ -1212,10 +1256,13 @@ function modeButtonsRow(parent, options, currentOption, onSelected)
     local strokes = {}
 
     local function refreshAll()
+        -- Always read the live palette at refresh time; never retain the original orange accent.
+        local liveAccent = peakHubAccentColor()
+        local liveSoft = peakHubSoftColor()
         for opt, btn in pairs(buttons) do
             local active = (opt == currentOption)
             local st = strokes[opt]
-            local info = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+            local info = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
             if active then
 
                 TweenService:Create(btn, info, {
@@ -1225,7 +1272,8 @@ function modeButtonsRow(parent, options, currentOption, onSelected)
                 }):Play()
                 if st then
                     st.Thickness = 2
-                    TweenService:Create(st, info, {Transparency = 0, Color = COLORS.Accent}):Play()
+                    st:SetAttribute("PeakHubThemeAccentStroke", true)
+                    TweenService:Create(st, info, {Transparency = 0, Color = liveAccent}):Play()
                 end
             else
 
@@ -1236,11 +1284,14 @@ function modeButtonsRow(parent, options, currentOption, onSelected)
                 }):Play()
                 if st then
                     st.Thickness = 1.4
-                    TweenService:Create(st, info, {Transparency = 0.45, Color = COLORS.AccentSoft}):Play()
+                    st:SetAttribute("PeakHubThemeAccentStroke", true)
+                    TweenService:Create(st, info, {Transparency = 0.45, Color = liveSoft}):Play()
                 end
             end
         end
     end
+
+    table.insert(_G.__PeakHubModeButtonRefreshers, refreshAll)
 
     local n = math.max(#options, 1)
     local pad = 4
@@ -1264,7 +1315,10 @@ function modeButtonsRow(parent, options, currentOption, onSelected)
         btn.MouseEnter:Connect(function()
             if opt == currentOption then return end
             local st2 = strokes[opt]
-            if st2 then TweenService:Create(st2, TweenInfo.new(0.1), {Transparency = 0.15, Color = COLORS.Accent}):Play() end
+            if st2 then
+                st2:SetAttribute("PeakHubThemeAccentStroke", true)
+                TweenService:Create(st2, TweenInfo.new(0.1), {Transparency = 0.15, Color = peakHubAccentColor()}):Play()
+            end
         end)
         btn.MouseLeave:Connect(function()
             if opt == currentOption then return end
@@ -2074,7 +2128,8 @@ local function refreshStopAtButtons()
         button.TextColor3 = Color3.fromRGB(255, 255, 255)
         local outline = button:FindFirstChildOfClass("UIStroke")
         if outline then
-            outline.Color = active and COLORS.Accent or COLORS.AccentSoft
+            outline.Color = active and peakHubAccentColor() or peakHubSoftColor()
+            outline:SetAttribute("PeakHubThemeAccentStroke", true)
             outline.Transparency = active and 0 or 0.45
             outline.Thickness = active and 2 or 1.2
         end
@@ -2094,7 +2149,8 @@ for index, percent in ipairs(stopAtChoices) do
     button.BorderSizePixel = 0
     button.Parent = stealStopAtRow
     corner(button, 6)
-    stroke(button, 1.2, COLORS.AccentSoft, 0.45)
+    local stopAtStroke = stroke(button, 1.2, peakHubSoftColor(), 0.45)
+    stopAtStroke:SetAttribute("PeakHubThemeAccentStroke", true)
     stopAtButtons[percent] = button
     button.MouseButton1Click:Connect(function()
         Config.AutoStealStopAt = percent
@@ -2774,14 +2830,17 @@ do
 
     local function isWarmAccent(c)
         local r, g, b = math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5)
-        return r >= 95 and r > g * 1.22 and g >= b * 1.18 and b <= 115 and g <= 190
+        -- Include bright amber/yellow-orange shades too; older Auto Steal controls used these.
+        return r >= 95 and r > g * 1.08 and g >= b * 1.08 and b <= 175 and g <= 235
     end
     local function isColoredAccent(c)
         local r, g, b = c.R, c.G, c.B
         local hi = math.max(r, g, b)
         local lo = math.min(r, g, b)
         -- Treat saturated or clearly tinted colors as theme accents, but preserve black and white.
-        return hi > 0.16 and hi < 0.96 and (hi - lo) > 0.10
+        -- Include fully bright saturated accents too (e.g. cyan/blue with a channel at 255).
+        -- Exclude only near-neutral whites/greys so theme changes do not recolor text or neutral UI.
+        return hi > 0.16 and (hi - lo) > 0.10 and not (lo > 0.88 and (hi - lo) < 0.12)
     end
     local function applyBackgroundTheme(index)
         local theme = BACKGROUND_THEMES[index] or BACKGROUND_THEMES[1]
@@ -2808,7 +2867,38 @@ do
         if mobileGui then table.insert(guiRoots, mobileGui) end
         for _, root in ipairs(guiRoots) do
             for _, obj in ipairs(root:GetDescendants()) do
-                if obj:IsA("GuiObject") then
+                if obj:IsA("UIGradient") then
+                    pcall(function()
+                        local seq = obj.Color
+                        local keys = seq.Keypoints
+                        local shouldRecolor = false
+                        for _, keypoint in ipairs(keys) do
+                            local c = keypoint.Value
+                            if isWarmAccent(c) or isColoredAccent(c) or c == oldAccent or c == oldSoft then
+                                shouldRecolor = true
+                                break
+                            end
+                        end
+                        if shouldRecolor then
+                            local recolored = {}
+                            for _, keypoint in ipairs(keys) do
+                                local c = keypoint.Value
+                                if isWarmAccent(c) or c == oldAccent then
+                                    c = theme.accent
+                                elseif c == oldSoft then
+                                    c = theme.soft
+                                elseif isColoredAccent(c) then
+                                    -- Map legacy tinted gradient stops to accent/soft by brightness,
+                                    -- so gradients remain dimensional and coordinated with the image.
+                                    local brightness = (c.R * 0.299) + (c.G * 0.587) + (c.B * 0.114)
+                                    c = brightness > 0.58 and theme.accent or theme.soft
+                                end
+                                table.insert(recolored, ColorSequenceKeypoint.new(keypoint.Time, c))
+                            end
+                            obj.Color = ColorSequence.new(recolored)
+                        end
+                    end)
+                elseif obj:IsA("GuiObject") then
                     pcall(function()
                         local name = string.lower(obj.Name or "")
                         local isToggle = name == "toggle" or name == "togglestroke" or name == "track"
@@ -2833,7 +2923,10 @@ do
                     end)
                 elseif obj:IsA("UIStroke") then
                     pcall(function()
-                        if isWarmAccent(obj.Color) or isColoredAccent(obj.Color) or obj.Color == oldAccent or obj.Color == oldSoft then
+                        if obj:GetAttribute("PeakHubThemeAccentStroke") == true
+                            or isWarmAccent(obj.Color) or isColoredAccent(obj.Color)
+                            or obj.Color == oldAccent or obj.Color == oldSoft then
+                            obj:SetAttribute("PeakHubThemeAccentStroke", true)
                             obj.Color = theme.accent
                         end
                     end)
@@ -2842,8 +2935,13 @@ do
         end
         -- Toggle tracks, active pills, and active side buttons follow the selected theme.
         for _, obj in ipairs(screenGui:GetDescendants()) do
-            if obj:IsA("UIStroke") and obj.Parent and (obj.Parent.Name == "Toggle" or obj.Parent.Name == "Track" or obj.Parent.Name == "ToggleStroke") then
-                obj.Color = theme.accent
+            if obj:IsA("UIStroke") and obj.Parent then
+                local parentName = obj.Parent.Name
+                if obj:GetAttribute("PeakHubThemeAccentStroke") == true
+                    or parentName == "Toggle" or parentName == "Track" or parentName == "ToggleStroke" then
+                    obj:SetAttribute("PeakHubThemeAccentStroke", true)
+                    obj.Color = theme.accent
+                end
             end
         end
         if mobileGui then
@@ -2857,6 +2955,7 @@ do
                         if st then st.Color = theme.accent end
                     elseif st then
                         st.Color = theme.accent
+                        st.Transparency = 0.05
                     end
                     local topAccent = btn:FindFirstChild("OrangeAccent")
                     if topAccent and topAccent:IsA("GuiObject") then topAccent.BackgroundColor3 = theme.accent end
@@ -2864,6 +2963,18 @@ do
             end
         end
         if StealSys and StealSys.applyTheme then pcall(StealSys.applyTheme) end
+
+        -- Repaint Auto Left/Right rows immediately while preserving their enabled state.
+        if autoLeftRow then pcall(setRowGlow, autoLeftRow, autoLeftRow:GetAttribute("GlowOn") == true) end
+        if autoRightRow then pcall(setRowGlow, autoRightRow, autoRightRow:GetAttribute("GlowOn") == true) end
+
+        -- Refresh Normal/Semi, V1/V2 and other segmented mode rows on the first click/theme change.
+        if type(_G.__PeakHubModeButtonRefreshers) == "table" then
+            for _, refreshModeRow in ipairs(_G.__PeakHubModeButtonRefreshers) do
+                if type(refreshModeRow) == "function" then pcall(refreshModeRow) end
+            end
+        end
+
         -- If tabs already exist, refresh the selected tab's accent now, not on the next click.
         if type(selectTab) == "function" then
             task.defer(function()
@@ -2871,6 +2982,10 @@ do
             end)
         end
     end
+
+    -- Apply the saved background palette immediately on startup as well as on arrow clicks.
+    -- Without this initial pass, Auto Steal controls can keep their default orange until the user changes background.
+    pcall(function() applyBackgroundTheme(Config.UIBackgroundIndex) end)
 
     local row = rowBase(settings, "Background", false)
     local valLbl = Instance.new("TextLabel")
@@ -2913,10 +3028,17 @@ do
             main.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
         end
         saveConfig()
+        -- Reapply once the image/background update and any UI property callbacks have settled.
+        task.defer(function()
+            pcall(function() applyBackgroundTheme(Config.UIBackgroundIndex) end)
+        end)
     end
     mkBackgroundArrow("<", -156).MouseButton1Click:Connect(function() setBackgroundIndex(math.max(1, Config.UIBackgroundIndex - 1)) end)
     mkBackgroundArrow(">", -64).MouseButton1Click:Connect(function() setBackgroundIndex(math.min(12, Config.UIBackgroundIndex + 1)) end)
     setBackgroundIndex(Config.UIBackgroundIndex)
+    task.defer(function()
+        pcall(function() applyBackgroundTheme(Config.UIBackgroundIndex) end)
+    end)
 end
 
 do
@@ -6018,7 +6140,8 @@ function buildMobileButtons()
         corner(topAccent, math.max(2, math.floor(2 * scale)))
 
         local st = Instance.new("UIStroke")
-        st.Color = OUTLINE
+        st.Color = _G.PeakHubThemeAccent or OUTLINE
+        st:SetAttribute("PeakHubThemeAccentStroke", true)
         st.Thickness = 1.6
         st.Transparency = 0.2
         st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border

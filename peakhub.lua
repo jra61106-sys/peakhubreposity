@@ -77,6 +77,7 @@ local Config = {
     BatCounter = false,
     MedusaCounter = false,
     AntiDie = false,
+    Spin = false,
     SafeMode = false,
     UIScale = 50,
     LockUI = false,
@@ -231,16 +232,65 @@ screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
+_G.PeakHubUILocked = Config.LockUI == true
 local main = Instance.new("Frame")
 main.Name = "Main"
 main.Size = UDim2.new(0, 340, 0, 545)
-main.Position = UDim2.new(0, 24, 0.22, -200)
+main.AnchorPoint = Vector2.new(0.5, 0.5)
+main.Position = UDim2.new(0.143, 0, 0.436, 0)
 main.BackgroundColor3 = COLORS.Background
 main.BackgroundTransparency = 1
 main.BorderSizePixel = 0
-main.Active = false
-main.Draggable = true
+main.Active = true
+main.Draggable = not Config.LockUI
 main.Parent = screenGui
+
+-- Manual dragging is disabled whenever Lock UI is enabled.
+do
+    local uiDragging = false
+    local dragInput = nil
+    local dragStart = nil
+    local startPosition = nil
+
+    main.InputBegan:Connect(function(input)
+        if Config.LockUI or _G.PeakHubUILocked then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            uiDragging = true
+            dragStart = input.Position
+            startPosition = main.Position
+            dragInput = input
+        end
+    end)
+
+    main.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if Config.LockUI or _G.PeakHubUILocked then uiDragging = false; return end
+        if not uiDragging or not dragStart or not startPosition then return end
+        if input ~= dragInput and input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(
+            startPosition.X.Scale, startPosition.X.Offset + delta.X,
+            startPosition.Y.Scale, startPosition.Y.Offset + delta.Y
+        )
+        _G.PeakHubMainWasDragged = true
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            uiDragging = false
+            dragInput = nil
+        end
+    end)
+end
+
 corner(main, 14)
 stroke(main, 1, COLORS.Stroke, 0.25)
 
@@ -367,15 +417,46 @@ applyUIBackground(Config.UIBackgroundUrl or BG_DEFAULT_URL)
 
 
 local uiScaleObj = Instance.new("UIScale")
+local deviceScaleFactor = 1
+local function refreshDeviceLayout()
+    local cam = workspace.CurrentCamera
+    local viewport = cam and cam.ViewportSize or Vector2.new(1280, 720)
+    local shortSide = math.min(viewport.X, viewport.Y)
+    if UserInputService.TouchEnabled and shortSide < 500 then
+        -- Small phones: compact enough to keep the full panel usable.
+        deviceScaleFactor = 0.76
+    elseif UserInputService.TouchEnabled and shortSide >= 600 then
+        -- iPad/tablet: only a subtle reduction.
+        deviceScaleFactor = 0.95
+    elseif UserInputService.TouchEnabled then
+        -- Larger phones / small mobile screens.
+        deviceScaleFactor = 0.84
+    else
+        -- Desktop: barely smaller than the original size.
+        deviceScaleFactor = 0.96
+    end
+    local base = math.clamp((tonumber(Config.UIScale) or 50) / 50, 0.2, 2)
+    uiScaleObj.Scale = base * deviceScaleFactor
+    -- Keep the panel around the middle, biased to the left side.
+    if not _G.PeakHubMainWasDragged then
+        main.AnchorPoint = Vector2.new(0.5, 0.5)
+        main.Position = UDim2.new(0.143, 0, 0.436, 0)
+    end
+end
+uiScaleObj.Scale = 0.88
+uiScaleObj.Parent = main
+refreshDeviceLayout()
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refreshDeviceLayout)
+end
+
 local function getTargetUIScale()
     return math.clamp((tonumber(Config.UIScale) or 50) / 50, 0.2, 2)
 end
-uiScaleObj.Scale = getTargetUIScale() * 0.88
-uiScaleObj.Parent = main
 
 function applyUIScale(val)
     Config.UIScale = math.clamp(tonumber(val) or 50, 10, 100)
-    local target = getTargetUIScale()
+    local target = getTargetUIScale() * deviceScaleFactor
     TweenService:Create(uiScaleObj, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Scale = target
     }):Play()
@@ -383,10 +464,10 @@ end
 
 
 task.defer(function()
-    local target = getTargetUIScale()
+    local target = getTargetUIScale() * deviceScaleFactor
 
     main.BackgroundTransparency = 1
-    TweenService:Create(uiScaleObj, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    TweenService:Create(uiScaleObj, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Scale = target
     }):Play()
 end)
@@ -542,6 +623,7 @@ end)
 
 
 miniRestoreButton.InputBegan:Connect(function(input)
+    if Config.LockUI or _G.PeakHubUILocked then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         miniDragging = true
         miniDragged = false
@@ -557,6 +639,7 @@ miniRestoreButton.InputEnded:Connect(function(input)
 end)
 
 UserInputService.InputChanged:Connect(function(input)
+    if Config.LockUI or _G.PeakHubUILocked then miniDragging = false; return end
     if not miniDragging then return end
     if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
     if not miniDragStart or not miniStartPos then return end
@@ -1969,6 +2052,10 @@ sectionLabel(combat, "Aim Assist")
 
 local startBatAimbot, stopBatAimbot
 local startAntiDie, stopAntiDie, syncAutoAntiDie
+local startSpin, stopSpin
+local setSpinGuiVisual
+local spinWasEnabledBeforeBat = false
+local applyBatSpinRule
 local startAutoStealSystem, stopAutoStealSystem
 local startAutoLeft, stopAutoLeft, startAutoRight, stopAutoRight
 local startBatCounter, stopBatCounter, startMedusaCounter, stopMedusaCounter
@@ -2016,6 +2103,8 @@ toggleWithKeybindRow(combat, "Bat Aimbot", Config.BatAimbot, Config.BatAimbotKey
     Config.BatAimbot = state
     State.autoBatToggled = state
     if mobBtnRefs and mobBtnRefs.autoBat then pcall(mobBtnRefs.autoBat, state) end
+    if _G.PeakHubSetBatAimbotUI then pcall(_G.PeakHubSetBatAimbotUI, state) end
+    if applyBatSpinRule then pcall(applyBatSpinRule, state) end
     if state then
         peakEquipBatOnce()
         if startBatAimbot then startBatAimbot() end
@@ -2234,7 +2323,55 @@ toggleRow(misc, "Anti Die", Config.AntiDie, function(state)
     else
         if stopAntiDie then pcall(stopAntiDie) end
     end
+    saveConfig()
 end)
+
+local spinRow
+spinRow, setSpinGuiVisual = toggleRow(misc, "Spin", Config.Spin, function(state)
+    -- Bat Aimbot has priority; Spin can only resume if it was already on before Bat Aimbot.
+    if state and (Config.BatAimbot or State.autoBatToggled) then
+        Config.Spin = false
+        if stopSpin then pcall(stopSpin) end
+        if setSpinGuiVisual then pcall(setSpinGuiVisual, false) end
+    else
+        Config.Spin = state == true
+        if Config.Spin then
+            if startSpin then pcall(startSpin) end
+        else
+            if stopSpin then pcall(stopSpin) end
+        end
+    end
+    -- Spin always requests Anti Die, regardless of the Anti Die UI toggle.
+    if syncAutoAntiDie then pcall(syncAutoAntiDie) end
+    saveConfig()
+end)
+
+applyBatSpinRule = function(enabled)
+    if enabled then
+        if Config.Spin == true then
+            spinWasEnabledBeforeBat = true
+            Config.Spin = false
+            if stopSpin then pcall(stopSpin) end
+            if setSpinGuiVisual then pcall(setSpinGuiVisual, false) end
+        end
+    else
+        if spinWasEnabledBeforeBat then
+            Config.Spin = true
+            if startSpin then pcall(startSpin) end
+            if setSpinGuiVisual then pcall(setSpinGuiVisual, true) end
+        end
+        spinWasEnabledBeforeBat = false
+    end
+    if syncAutoAntiDie then pcall(syncAutoAntiDie) end
+    saveConfig()
+end
+
+-- Initial sync: if Bat Aimbot starts from a saved config, keep both interfaces consistent.
+if Config.BatAimbot or State.autoBatToggled then
+    if mobBtnRefs and mobBtnRefs.autoBat then pcall(mobBtnRefs.autoBat, true) end
+    if _G.PeakHubSetBatAimbotUI then pcall(_G.PeakHubSetBatAimbotUI, true) end
+    if applyBatSpinRule then pcall(applyBatSpinRule, true) end
+end
 
 sectionLabel(misc, "ACTIONS")
 
@@ -2752,11 +2889,9 @@ local settings = makePage("Settings")
 
 
 
-if Config.LockUI then
-    main.Draggable = false
-else
-    main.Draggable = true
-end
+-- Lock UI freezes the main interface and its manual/native dragging.
+main.Active = true
+main.Draggable = not Config.LockUI
 if Config.HideUI then
     main.Visible = false
     uiMinimized = true
@@ -2846,6 +2981,9 @@ do
         local theme = BACKGROUND_THEMES[index] or BACKGROUND_THEMES[1]
         _G.PeakHubThemeAccent = theme.accent
         _G.PeakHubThemeSoft = theme.soft
+        if type(_G.PeakHubRefreshVisualAccents) == "function" then
+            pcall(_G.PeakHubRefreshVisualAccents)
+        end
         local oldAccent = COLORS.Accent
         local oldSoft = COLORS.AccentSoft
         COLORS.TabActive = theme.accent
@@ -2933,41 +3071,119 @@ do
                 end
             end
         end
-        -- Toggle tracks, active pills, and active side buttons follow the selected theme.
+        -- Toggle tracks, active pills, and row outlines follow the selected theme.
+        -- RowStroke is forced explicitly because legacy orange strokes may not match
+        -- the previous palette exactly and otherwise can remain orange after a swap.
         for _, obj in ipairs(screenGui:GetDescendants()) do
             if obj:IsA("UIStroke") and obj.Parent then
                 local parentName = obj.Parent.Name
-                if obj:GetAttribute("PeakHubThemeAccentStroke") == true
+                if obj.Name == "RowStroke"
+                    or obj:GetAttribute("PeakHubThemeAccentStroke") == true
                     or parentName == "Toggle" or parentName == "Track" or parentName == "ToggleStroke" then
                     obj:SetAttribute("PeakHubThemeAccentStroke", true)
                     obj.Color = theme.accent
                 end
             end
         end
-        if mobileGui then
-            for _, btn in ipairs(mobileGui:GetChildren()) do
-                if btn:IsA("TextButton") then
-                    local st = btn:FindFirstChildOfClass("UIStroke")
-                    if btn:GetAttribute("PeakHubActive") == true then
-                        btn.BackgroundColor3 = theme.accent
-                        local activeGrad = btn:FindFirstChildOfClass("UIGradient")
-                        if activeGrad then activeGrad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, theme.soft), ColorSequenceKeypoint.new(1, theme.accent)}) end
-                        if st then st.Color = theme.accent end
-                    elseif st then
-                        st.Color = theme.accent
-                        st.Transparency = 0.05
-                    end
-                    local topAccent = btn:FindFirstChild("OrangeAccent")
-                    if topAccent and topAccent:IsA("GuiObject") then topAccent.BackgroundColor3 = theme.accent end
+        -- Force the row outline color for the specific rows called out by the user
+        -- (Drop and Bat Aimbot included), without changing their keybind/toggle controls.
+        for _, obj in ipairs(screenGui:GetDescendants()) do
+            if obj:IsA("Frame") then
+                local rowStroke = obj:FindFirstChild("RowStroke")
+                if rowStroke and rowStroke:IsA("UIStroke") then
+                    rowStroke.Color = theme.accent
+                    rowStroke:SetAttribute("PeakHubThemeAccentStroke", true)
                 end
             end
         end
+        -- Mobile side buttons are refreshed explicitly from the selected GUI palette.
+        -- This avoids old hard-coded orange/blue values overriding the current theme.
+        if mobileGui then
+            for _, btn in ipairs(mobileGui:GetChildren()) do
+                if btn:IsA("TextButton") then
+                    local active = btn:GetAttribute("PeakHubActive") == true
+                    local st = btn:FindFirstChildOfClass("UIStroke")
+                    local grad = btn:FindFirstChildOfClass("UIGradient")
+                    local topAccent = btn:FindFirstChild("OrangeAccent")
+                    btn.BackgroundColor3 = active and theme.accent or Color3.fromRGB(18, 18, 20)
+                    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    btn.TextTransparency = 0
+                    btn.TextStrokeTransparency = 1
+                    if grad then
+                        if active then
+                            grad.Color = ColorSequence.new({
+                                ColorSequenceKeypoint.new(0, theme.soft),
+                                ColorSequenceKeypoint.new(1, theme.accent),
+                            })
+                        else
+                            grad.Color = ColorSequence.new({
+                                ColorSequenceKeypoint.new(0, Color3.fromRGB(35, 35, 40)),
+                                ColorSequenceKeypoint.new(1, Color3.fromRGB(18, 18, 20)),
+                            })
+                        end
+                    end
+                    if st then
+                        st.Color = theme.accent
+                        st.Thickness = active and 3 or 1.8
+                        st.Transparency = active and 0 or 0.05
+                        st:SetAttribute("PeakHubThemeAccentStroke", true)
+                    end
+                    if topAccent and topAccent:IsA("GuiObject") then
+                        topAccent.BackgroundColor3 = theme.accent
+                        topAccent.Visible = active
+                    end
+                end
+            end
+        end
+        if type(_G.PeakHubRefreshMobileButtonTheme) == "function" then
+            pcall(_G.PeakHubRefreshMobileButtonTheme, theme.accent, theme.soft)
+        end
         if StealSys and StealSys.applyTheme then pcall(StealSys.applyTheme) end
 
-        -- Repaint Auto Left/Right rows immediately while preserving their enabled state.
+        -- Keep the row label white while the full row outline follows the active UI theme.
+        local function recolorNamedRow(targetText)
+            local target = string.lower((targetText or ""):gsub("%s+", " "))
+            for _, label in ipairs(screenGui:GetDescendants()) do
+                if (label:IsA("TextLabel") or label:IsA("TextButton"))
+                    and string.lower((label.Text or ""):gsub("%s+", " ")) == target then
+                    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    local node = label.Parent
+                    while node and node ~= screenGui do
+                        if node:IsA("Frame") then
+                            local outline = node:FindFirstChild("RowStroke")
+                            if outline and outline:IsA("UIStroke") then
+                                node:SetAttribute("PeakHubThemeRow", true)
+                                outline.Color = theme.accent
+                                outline:SetAttribute("PeakHubThemeAccentStroke", true)
+                                break
+                            end
+                        end
+                        node = node.Parent
+                    end
+                end
+            end
+        end
+        recolorNamedRow("Drop")
+        recolorNamedRow("Bat Aimbot")
+
+        -- Repaint all progress-bar header/status text every time the background changes.
+        if StealSys then
+            for _, label in ipairs({StealSys.titleLabel, StealSys.modeLabel, StealSys.radiusLabel, StealSys.progressLabel, StealSys.discordLabel}) do
+                if label and label:IsA("TextLabel") then label.TextColor3 = theme.accent end
+            end
+        end
+        -- Also update labels by their actual instance names; this covers header labels
+        -- whose reference fields differ between older and newer progress-bar builds.
+        for _, label in ipairs(screenGui:GetDescendants()) do
+            if label:IsA("TextLabel") and ({ModeLabel=true, DiscordHeaderLabel=true, RadiusLabel=true, Status=true})[label.Name] then
+                label.TextColor3 = theme.accent
+            end
+        end
+
+        -- Repaint action rows immediately while preserving their enabled state.
+        if dropActionRow then pcall(setRowGlow, dropActionRow, dropActionRow:GetAttribute("GlowOn") == true) end
         if autoLeftRow then pcall(setRowGlow, autoLeftRow, autoLeftRow:GetAttribute("GlowOn") == true) end
         if autoRightRow then pcall(setRowGlow, autoRightRow, autoRightRow:GetAttribute("GlowOn") == true) end
-
         -- Refresh Normal/Semi, V1/V2 and other segmented mode rows on the first click/theme change.
         if type(_G.__PeakHubModeButtonRefreshers) == "table" then
             for _, refreshModeRow in ipairs(_G.__PeakHubModeButtonRefreshers) do
@@ -3129,7 +3345,14 @@ end
 
 toggleRow(settings, "Lock UI", Config.LockUI, function(state)
     Config.LockUI = state
+    main.Active = true
     main.Draggable = not state
+    -- Lock UI freezes every draggable UI surface, including the Auto Steal bar.
+    _G.PeakHubUILocked = state
+    if state then
+        _G.PeakHubMainWasDragged = _G.PeakHubMainWasDragged or false
+        -- Drag handlers read this flag on every input update, so all side buttons freeze immediately.
+    end
 end)
 
 do
@@ -3287,6 +3510,7 @@ do
         Config.CircleButtons = false
         Config.IntroEnabled = true
         applyUIScale(50)
+        main.Active = true
         main.Draggable = true
         main.Visible = true
         if State.autoBatToggled and stopBatAimbot then pcall(stopBatAimbot); State.autoBatToggled = false end
@@ -3683,8 +3907,29 @@ stopAntiDie = function()
 end
 
 
+-- Spin has one fixed setting: Very Fast (0.90), with no speed selector.
+local spinConn = nil
+startSpin = function()
+    if spinConn then spinConn:Disconnect(); spinConn = nil end
+    spinConn = RunService.Heartbeat:Connect(function()
+        if not Config.Spin then return end
+        local char = LP.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if root then
+            pcall(function()
+                root.CFrame = root.CFrame * CFrame.Angles(0, 0.90, 0)
+            end)
+        end
+    end)
+end
+
+stopSpin = function()
+    if spinConn then spinConn:Disconnect(); spinConn = nil end
+end
+
 syncAutoAntiDie = function()
     local need = (Config.AntiDie == true)
+        or (Config.Spin == true)
         or (Config.BatAimbot == true)
         or (State.autoBatToggled == true)
         or (dropActive == true)
@@ -3694,6 +3939,12 @@ syncAutoAntiDie = function()
         if stopAntiDie then stopAntiDie() end
     end
 end
+
+-- Restore Spin state from config and keep Anti Die synchronized with it.
+if Config.Spin == true then
+    if startSpin then pcall(startSpin) end
+end
+if syncAutoAntiDie then pcall(syncAutoAntiDie) end
 
 function __vyzeInitMiscLogic()
 
@@ -4434,6 +4685,7 @@ StealSys = {
     progressFill = nil,
     progressLabel = nil,
     progressFrame = nil,
+    titleLabel = nil,
     modeLabel = nil,
     radiusLabel = nil,
 }
@@ -4462,41 +4714,92 @@ do
 
     local card = Instance.new("Frame")
     card.Name = "StealBar"
-    card.Size = UDim2.new(0, barW, 0, 52)
+    card.Size = UDim2.new(0, barW, 0, 76)
     local savedBarX = tonumber(Config.StealBarPosX)
     local savedBarY = tonumber(Config.StealBarPosY)
     if savedBarX and savedBarY then
         card.Position = UDim2.fromOffset(savedBarX, savedBarY)
     else
-        card.Position = UDim2.new(0.5, -math.floor(barW / 2), 1, -100)
+        card.Position = UDim2.new(0.5, -math.floor(barW / 2), 1, -112)
     end
     card.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    card.BackgroundTransparency = 0.1
+    card.BackgroundTransparency = 0.28
     card.BorderSizePixel = 0
-    card.ClipsDescendants = true
-    card.Active = true
+    card.ClipsDescendants = false
+    -- Keep the panel click-through; only visible controls above it can receive input.
+    card.Active = false
+    card.Selectable = false
     card.Parent = spGui
-    corner(card, 12)
-    stroke(card, 1.2, COLORS.Stroke, 0.35)
+    corner(card, 8)
+    -- Transparent layout: no enclosing card or decorative border.
+    local progressCardStroke = nil
+
+    local accentRail = Instance.new("Frame")
+    accentRail.Name = "AccentRail"
+    accentRail.Size = UDim2.new(0, 0, 1, -12)
+    accentRail.Position = UDim2.new(0, 0, 0, 6)
+    accentRail.BackgroundColor3 = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
+    accentRail.BorderSizePixel = 0
+    accentRail.ZIndex = 3
+    accentRail.Parent = card
+    corner(accentRail, 2)
+
+    local headerRule = Instance.new("Frame")
+    headerRule.Name = "HeaderRule"
+    headerRule.Size = UDim2.new(1, -24, 0, 1)
+    headerRule.Position = UDim2.new(0, 12, 0, 25)
+    headerRule.BackgroundColor3 = Color3.fromRGB(48, 48, 48)
+    headerRule.BorderSizePixel = 0
+    headerRule.ZIndex = 3
+    headerRule.Parent = card
+
+    -- Dedicated header handle: lets the bar move when unlocked without making the whole panel block clicks.
+    local dragHandle = Instance.new("TextButton")
+    dragHandle.Name = "DragHandle"
+    dragHandle.Size = UDim2.new(1, 0, 0, 27)
+    dragHandle.Position = UDim2.new(0, 0, 0, 0)
+    dragHandle.BackgroundTransparency = 1
+    dragHandle.Text = ""
+    dragHandle.AutoButtonColor = false
+    dragHandle.Active = true
+    dragHandle.Selectable = false
+    dragHandle.ZIndex = 8
+    dragHandle.Parent = card
+
     StealSys.progressGui = spGui
     -- Keep every accent in the Steal progress bar synchronized with the selected UI background.
     local function applyStealBarTheme()
         local accent = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
-        local soft = _G.PeakHubThemeSoft or accent
         local cardStroke = card:FindFirstChildOfClass("UIStroke")
-        if cardStroke then cardStroke.Color = accent end
+        if cardStroke then cardStroke.Color = Color3.fromRGB(62, 62, 62) end
+        local soft = _G.PeakHubThemeSoft or COLORS.AccentSoft or Color3.fromRGB(100, 35, 0)
+        local rail = card:FindFirstChild("AccentRail")
+        if rail then rail.BackgroundColor3 = accent end
+        local rule = card:FindFirstChild("HeaderRule")
+        if rule then rule.BackgroundColor3 = accent end
         if StealSys.progressFill then StealSys.progressFill.BackgroundColor3 = accent end
+        local track = card:FindFirstChild("ProgressTrack")
+        if track then
+            -- Keep the track readable, but make its subtle tint follow the selected background theme.
+            track.BackgroundColor3 = soft
+            track.BackgroundTransparency = 0.18
+            local ts = track:FindFirstChildOfClass("UIStroke")
+            if ts then ts.Color = accent end
+        end
+        -- Every progress-bar text element follows the selected background theme.
+        if StealSys.titleLabel then StealSys.titleLabel.TextColor3 = accent end
+        if StealSys.progressLabel then StealSys.progressLabel.TextColor3 = accent end
         if StealSys.modeLabel then StealSys.modeLabel.TextColor3 = accent end
         if StealSys.radiusLabel then StealSys.radiusLabel.TextColor3 = accent end
-        if StealSys.discordLabel then StealSys.discordLabel.TextColor3 = Color3.fromRGB(255, 255, 255) end
+        if StealSys.discordLabel then StealSys.discordLabel.TextColor3 = accent end
     end
     StealSys.applyTheme = applyStealBarTheme
     applyStealBarTheme()
 
     do
         local dragging, dragStart, startPos
-        card.InputBegan:Connect(function(input)
-            if Config.LockUI then return end
+        dragHandle.InputBegan:Connect(function(input)
+            if Config.LockUI or _G.PeakHubUILocked then return end
             if input.UserInputType == Enum.UserInputType.MouseButton1
                 or input.UserInputType == Enum.UserInputType.Touch then
                 dragging = true
@@ -4505,7 +4808,8 @@ do
             end
         end)
         UserInputService.InputChanged:Connect(function(input)
-            if not dragging or Config.LockUI then return end
+            if Config.LockUI or _G.PeakHubUILocked then dragging = false; return end
+            if not dragging then return end
             if input.UserInputType == Enum.UserInputType.MouseMovement
                 or input.UserInputType == Enum.UserInputType.Touch then
                 local d = input.Position - dragStart
@@ -4536,9 +4840,9 @@ do
         local s = math.clamp(tonumber(Config.StealBarSize) or 50, 35, 90)
         local scale = s / 50
         local w = math.floor(s * 6)
-        local h = math.floor(52 * scale)
-        local trackH = math.max(10, math.floor(16 * scale))
-        local topH = math.max(14, math.floor(18 * scale))
+        local h = math.floor(53 * scale)
+        local trackH = math.max(7, math.floor(8 * scale))
+        local topH = math.max(14, math.floor(19 * scale))
         local textSize = math.clamp(math.floor(11 * scale + 0.5), 8, 18)
         local pctSize = math.clamp(math.floor(11 * scale + 0.5), 8, 18)
 
@@ -4547,28 +4851,34 @@ do
             StealSys.progressFrame.Size = UDim2.new(0, w, 0, h)
             StealSys.progressFrame.Position = UDim2.new(p.X.Scale, p.X.Offset, p.Y.Scale, p.Y.Offset)
         end
-        if StealSys.modeLabel then
-            StealSys.modeLabel.TextSize = textSize
-            StealSys.modeLabel.Size = UDim2.new(0.38, 0, 0, topH)
-            StealSys.modeLabel.Position = UDim2.new(0, math.floor(10 * scale), 0, math.floor(4 * scale))
+        if StealSys.titleLabel then
+            StealSys.titleLabel.TextSize = math.clamp(math.floor(9 * scale + 0.5), 8, 14)
+            StealSys.titleLabel.Size = UDim2.new(0.36, -8, 0, topH)
+            StealSys.titleLabel.Position = UDim2.new(0, math.floor(12 * scale), 0, math.floor(5 * scale))
         end
-        if StealSys.discordLabel then
-            StealSys.discordLabel.TextSize = textSize
-            StealSys.discordLabel.Size = UDim2.new(0.34, 0, 0, topH)
-            StealSys.discordLabel.Position = UDim2.new(0.33, 0, 0, math.floor(4 * scale))
+        if StealSys.modeLabel then
+            StealSys.modeLabel.TextSize = math.clamp(math.floor(8 * scale + 0.5), 7, 12)
+            StealSys.modeLabel.Size = UDim2.new(0.34, -4, 0, topH)
+            StealSys.modeLabel.Position = UDim2.new(0.34, 0, 0, math.floor(5 * scale))
         end
         if StealSys.radiusLabel then
-            StealSys.radiusLabel.TextSize = textSize
-            StealSys.radiusLabel.Size = UDim2.new(0.32, -10, 0, topH)
-            StealSys.radiusLabel.Position = UDim2.new(0.68, 0, 0, math.floor(4 * scale))
+            StealSys.radiusLabel.TextSize = math.clamp(math.floor(9 * scale + 0.5), 8, 14)
+            StealSys.radiusLabel.Size = UDim2.new(0.30, -12, 0, topH)
+            StealSys.radiusLabel.Position = UDim2.new(0.70, 0, 0, math.floor(5 * scale))
+        end
+        if StealSys.discordLabel then
+            StealSys.discordLabel.Visible = false
         end
         local track = StealSys.progressFrame and StealSys.progressFrame:FindFirstChild("ProgressTrack")
         if track then
-            track.Size = UDim2.new(1, -math.floor(16 * scale), 0, trackH)
-            track.Position = UDim2.new(0, math.floor(8 * scale), 0, math.floor(28 * scale))
+            track.Size = UDim2.new(1, -math.floor(24 * scale), 0, math.max(2, math.floor(3 * scale)))
+            track.Position = UDim2.new(0, math.floor(12 * scale), 0, math.floor(45 * scale))
         end
         if StealSys.progressLabel then
             StealSys.progressLabel.TextSize = pctSize
+            StealSys.progressLabel.Size = UDim2.new(1, -24, 0, math.floor(14 * scale))
+            StealSys.progressLabel.Position = UDim2.new(0, 12, 0, math.floor(29 * scale))
+            StealSys.progressLabel.TextXAlignment = Enum.TextXAlignment.Center
         end
 
         saveConfig()
@@ -4598,59 +4908,58 @@ do
     end
 
 
+    local titleLbl = Instance.new("TextLabel")
+    titleLbl.Name = "TitleLabel"
+    titleLbl.Size = UDim2.new(0.38, -6, 0, 19)
+    titleLbl.Position = UDim2.new(0, 12, 0, 5)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Text = "Normal • V2"
+    titleLbl.TextColor3 = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
+    titleLbl.Font = Enum.Font.GothamBold
+    titleLbl.TextSize = 10
+    titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+    titleLbl.ZIndex = 6
+    titleLbl.Parent = card
+
     local modeLbl = Instance.new("TextLabel")
-    modeLbl.Name = "ModeLabel"
-    modeLbl.Size = UDim2.new(0.38, 0, 0, 18)
-    modeLbl.Position = UDim2.new(0, 10, 0, 4)
+    modeLbl.Name = "DiscordHeaderLabel"
+    modeLbl.Size = UDim2.new(0.34, -4, 0, 19)
+    modeLbl.Position = UDim2.new(0.34, 0, 0, 5)
     modeLbl.BackgroundTransparency = 1
-    modeLbl.Text = "Normal • V1"
-    modeLbl.TextColor3 = Color3.fromRGB(255, 180, 80)
-    modeLbl.Font = Enum.Font.GothamBold
-    modeLbl.TextSize = 11
-    modeLbl.TextXAlignment = Enum.TextXAlignment.Left
+    modeLbl.Text = ".gg/YamGmyG3G9"
+    modeLbl.TextColor3 = Color3.fromRGB(238, 238, 238)
+    modeLbl.Font = Enum.Font.GothamMedium
+    modeLbl.TextSize = 9
+    modeLbl.TextXAlignment = Enum.TextXAlignment.Center
     modeLbl.ZIndex = 6
     modeLbl.Parent = card
 
-
-    local discLbl = Instance.new("TextLabel")
-    discLbl.Name = "DiscordLabel"
-    discLbl.Size = UDim2.new(0.34, 0, 0, 18)
-    discLbl.Position = UDim2.new(0.33, 0, 0, 4)
-    discLbl.BackgroundTransparency = 1
-    discLbl.Text = "discord.gg/YamGmyG3G9"
-    discLbl.TextColor3 = Color3.fromRGB(255, 180, 80)
-    discLbl.Font = Enum.Font.GothamBold
-    discLbl.TextSize = 11
-    discLbl.TextXAlignment = Enum.TextXAlignment.Center
-    discLbl.ZIndex = 6
-    discLbl.Parent = card
-
-
     local radLbl = Instance.new("TextLabel")
     radLbl.Name = "RadiusLabel"
-    radLbl.Size = UDim2.new(0.32, -10, 0, 18)
-    radLbl.Position = UDim2.new(0.68, 0, 0, 4)
+    radLbl.Size = UDim2.new(0.29, -10, 0, 19)
+    radLbl.Position = UDim2.new(0.70, 0, 0, 5)
     radLbl.BackgroundTransparency = 1
     radLbl.Text = "Radius: 61"
-    radLbl.TextColor3 = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 180, 80)
-    radLbl.Font = Enum.Font.GothamBold
-    radLbl.TextSize = 11
+    radLbl.TextColor3 = Color3.fromRGB(175, 175, 175)
+    radLbl.Font = Enum.Font.GothamMedium
+    radLbl.TextSize = 9
     radLbl.TextXAlignment = Enum.TextXAlignment.Right
     radLbl.ZIndex = 6
     radLbl.Parent = card
 
-
     local track = Instance.new("Frame")
     track.Name = "ProgressTrack"
-    track.Size = UDim2.new(1, -16, 0, 16)
-    track.Position = UDim2.new(0, 8, 0, 28)
-    track.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    track.BackgroundTransparency = 0.28
+    track.Size = UDim2.new(1, -24, 0, 3)
+    track.Position = UDim2.new(0, 12, 0, 45)
+    track.BackgroundColor3 = _G.PeakHubThemeSoft or COLORS.AccentSoft or Color3.fromRGB(100, 35, 0)
+    track.BackgroundTransparency = 0.18
     track.BorderSizePixel = 0
     track.ClipsDescendants = true
+    track.Active = false
+    track.Selectable = false
     track.ZIndex = 4
     track.Parent = card
-    corner(track, 8)
+    corner(track, 3)
 
     local fill = Instance.new("Frame")
     fill.Name = "ProgressFill"
@@ -4658,26 +4967,46 @@ do
     fill.Position = UDim2.new(0, 0, 0, 0)
     fill.BackgroundColor3 = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
     fill.BorderSizePixel = 0
+    fill.Active = false
+    fill.Selectable = false
     fill.ZIndex = 5
     fill.Parent = track
-    corner(fill, 8)
-
+    corner(fill, 3)
 
     local pct = Instance.new("TextLabel")
     pct.Name = "Status"
-    pct.Size = UDim2.new(1, 0, 1, 0)
+    pct.Size = UDim2.new(1, -24, 0, 14)
+    pct.Position = UDim2.new(0, 12, 0, 29)
     pct.BackgroundTransparency = 1
     pct.Text = "0%"
-    pct.TextColor3 = Color3.fromRGB(255, 255, 255)
-    pct.Font = Enum.Font.GothamBlack
-    pct.TextSize = 11
+    pct.TextColor3 = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
+    pct.Font = Enum.Font.GothamBold
+    pct.TextSize = 10
     pct.TextStrokeTransparency = 1
+    pct.Active = false
+    pct.Selectable = false
     pct.ZIndex = 7
-    pct.Parent = track
+    pct.TextXAlignment = Enum.TextXAlignment.Center
+    pct.Parent = card
+
+    local discLbl = Instance.new("TextLabel")
+    discLbl.Name = "DiscordLabel"
+    discLbl.Size = UDim2.new(1, -24, 0, 12)
+    discLbl.Position = UDim2.new(0, 12, 0, 61)
+    discLbl.BackgroundTransparency = 1
+    discLbl.Text = "discord.gg/YamGmyG3G9"
+    discLbl.Visible = false
+    discLbl.TextColor3 = Color3.fromRGB(180, 180, 180)
+    discLbl.Font = Enum.Font.GothamMedium
+    discLbl.TextSize = 8
+    discLbl.TextXAlignment = Enum.TextXAlignment.Left
+    discLbl.ZIndex = 6
+    discLbl.Parent = card
 
     StealSys.progressFill = fill
     StealSys.progressLabel = pct
     StealSys.progressFrame = card
+    StealSys.titleLabel = titleLbl
     StealSys.modeLabel = modeLbl
     StealSys.discordLabel = discLbl
     StealSys.radiusLabel = radLbl
@@ -4689,13 +5018,13 @@ do
 end
 
 function StealSys.refreshMeta()
-    if StealSys.modeLabel then
+    if StealSys.titleLabel then
         if Config.AutoStealMode == "Semi" then
-            StealSys.modeLabel.Text = "Semi"
+            StealSys.titleLabel.Text = "Semi"
         else
-            local ver = Config.AutoStealVersion or "V1"
+            local ver = Config.AutoStealVersion or "V2"
             if ver == "V3" then ver = "V2" end
-            StealSys.modeLabel.Text = "Normal • " .. tostring(ver)
+            StealSys.titleLabel.Text = "Normal • " .. tostring(ver)
         end
     end
     if StealSys.radiusLabel then
@@ -4708,26 +5037,29 @@ refreshStealBarMeta = function()
     if StealSys.applyTheme then pcall(StealSys.applyTheme) end
 end
 
+local activeStealFillTween
 function updateStealProgress(progress, label)
     local f = math.clamp(tonumber(progress) or 0, 0, 1)
     if StealSys.progressFill then
-        StealSys.progressFill.BackgroundColor3 = _G.PeakHubThemeAccent or COLORS.Accent or StealSys.progressFill.BackgroundColor3
-        TweenService:Create(StealSys.progressFill, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-            Size = UDim2.new(f, 0, 1, 0)
-        }):Play()
+        local fill = StealSys.progressFill
+        fill.BackgroundColor3 = _G.PeakHubThemeAccent or COLORS.Accent or fill.BackgroundColor3
+        if activeStealFillTween then
+            pcall(function() activeStealFillTween:Cancel() end)
+        end
+        activeStealFillTween = TweenService:Create(fill, TweenInfo.new(0.07, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
+            Size = UDim2.new(f * 0.94, 0, 1, 0)
+        })
+        activeStealFillTween:Play()
     end
     if StealSys.progressLabel then
         if label and label ~= "" then
             StealSys.progressLabel.Text = label
-        elseif f >= 0.99 then
-            StealSys.progressLabel.Text = "READY"
-            StealSys.progressLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
         elseif f > 0 then
             StealSys.progressLabel.Text = string.format("%d%%", math.floor(f * 100 + 0.5))
-            StealSys.progressLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            StealSys.progressLabel.TextColor3 = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
         else
             StealSys.progressLabel.Text = Config.AutoSteal and "0%" or "OFF"
-            StealSys.progressLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            StealSys.progressLabel.TextColor3 = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
         end
     end
     refreshStealBarMeta()
@@ -5594,6 +5926,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
             if Config.BatAimbot then startBatAimbot() else stopBatAimbot() end
             if mobBtnRefs and mobBtnRefs.autoBat then pcall(mobBtnRefs.autoBat, Config.BatAimbot) end
             if _G.PeakHubSetBatAimbotUI then pcall(_G.PeakHubSetBatAimbotUI, Config.BatAimbot) end
+            if applyBatSpinRule then pcall(applyBatSpinRule, Config.BatAimbot) end
             saveConfig()
         end
 
@@ -5978,11 +6311,26 @@ function buildMobileButtons()
 
 
     local OFF_BG = Color3.fromRGB(18, 18, 20)
-    local OFF_TXT = Color3.fromRGB(255, 255, 255)
-    local ON_BG = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
-    local ON_TXT = Color3.fromRGB(255, 255, 255)
-    local OUTLINE = _G.PeakHubThemeAccent or Color3.fromRGB(255, 145, 25)
-    local ACCENT = _G.PeakHubThemeAccent or Color3.fromRGB(255, 177, 76)
+    -- OFF labels follow the outline accent; ON labels use a contrasting color.
+    local function mobileContrastText(color)
+        local function linearChannel(v)
+            if v <= 0.04045 then return v / 12.92 end
+            return ((v + 0.055) / 1.055) ^ 2.4
+        end
+        local luminance = 0.2126 * linearChannel(color.R)
+            + 0.7152 * linearChannel(color.G)
+            + 0.0722 * linearChannel(color.B)
+        if luminance > 0.179 then
+            return Color3.fromRGB(8, 8, 8)
+        end
+        return Color3.fromRGB(255, 255, 255)
+    end
+    local function liveMobileAccent()
+        return _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
+    end
+    local function liveMobileSoft()
+        return _G.PeakHubThemeSoft or COLORS.AccentSoft or Color3.fromRGB(100, 35, 0)
+    end
 
     local scale = math.clamp((tonumber(Config.MobileButtonSize) or 50) / 50, 0.2, 2.5)
     local BTN_W = math.floor(64 * scale)
@@ -6033,33 +6381,85 @@ function buildMobileButtons()
     local function setBtnVisual(btn, on)
         local st = btn:FindFirstChildOfClass("UIStroke")
         local grad = btn:FindFirstChildOfClass("UIGradient")
+        local topLine = btn:FindFirstChild("OrangeAccent")
+        local accent = liveMobileAccent()
+        local soft = liveMobileSoft()
         if on then
             btn:SetAttribute("PeakHubActive", true)
-            btn.BackgroundColor3 = _G.PeakHubThemeAccent or OUTLINE
-            btn.TextColor3 = ON_TXT
-            btn.TextStrokeColor3 = Color3.fromRGB(255, 218, 160)
-            btn.TextStrokeTransparency = 0.18
+            btn.BackgroundColor3 = accent
+            btn.TextColor3 = mobileContrastText(accent)
+            btn.TextTransparency = 0
+            btn.TextStrokeTransparency = 1
+            if topLine then
+                topLine.BackgroundColor3 = accent
+                topLine.Visible = true
+            end
             if grad then
-                grad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, _G.PeakHubThemeSoft or (_G.PeakHubThemeAccent or OUTLINE)), ColorSequenceKeypoint.new(1, _G.PeakHubThemeAccent or OUTLINE)})
+                grad.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, soft),
+                    ColorSequenceKeypoint.new(1, accent),
+                })
             end
             if st then
-                st.Color = _G.PeakHubThemeAccent or OUTLINE
+                st.Color = accent
                 st.Thickness = 3
                 st.Transparency = 0
+                st:SetAttribute("PeakHubThemeAccentStroke", true)
             end
         else
             btn:SetAttribute("PeakHubActive", false)
             btn.BackgroundColor3 = OFF_BG
-            btn.TextColor3 = OFF_TXT
+            btn.TextColor3 = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.28)
             btn.TextTransparency = 0
             btn.TextStrokeTransparency = 1
+            if topLine then
+                topLine.BackgroundColor3 = accent
+                topLine.Visible = false
+            end
             if grad then
-                grad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)), ColorSequenceKeypoint.new(1, OFF_BG)})
+                grad.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(35, 35, 40)),
+                    ColorSequenceKeypoint.new(1, OFF_BG),
+                })
             end
             if st then
-                st.Color = _G.PeakHubThemeAccent or OUTLINE
+                st.Color = accent
                 st.Thickness = 1.8
                 st.Transparency = 0.05
+                st:SetAttribute("PeakHubThemeAccentStroke", true)
+            end
+        end
+    end
+
+    -- One source of truth: every side button follows the active GUI accent.
+    _G.PeakHubRefreshMobileButtonTheme = function()
+        local accent = liveMobileAccent()
+        local soft = liveMobileSoft()
+        for _, btn in ipairs(gui:GetChildren()) do
+            if btn:IsA("TextButton") then
+                local active = btn:GetAttribute("PeakHubActive") == true
+                local st = btn:FindFirstChildOfClass("UIStroke")
+                local grad = btn:FindFirstChildOfClass("UIGradient")
+                local topLine = btn:FindFirstChild("OrangeAccent")
+                btn.BackgroundColor3 = active and accent or OFF_BG
+                btn.TextColor3 = active and mobileContrastText(accent) or accent:Lerp(Color3.fromRGB(255, 255, 255), 0.28)
+                btn.TextTransparency = 0
+                btn.TextStrokeTransparency = 1
+                if grad then
+                    grad.Color = active
+                        and ColorSequence.new({ColorSequenceKeypoint.new(0, soft), ColorSequenceKeypoint.new(1, accent)})
+                        or ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(35, 35, 40)), ColorSequenceKeypoint.new(1, OFF_BG)})
+                end
+                if st then
+                    st.Color = accent
+                    st.Thickness = active and 3 or 1.8
+                    st.Transparency = active and 0 or 0.05
+                    st:SetAttribute("PeakHubThemeAccentStroke", true)
+                end
+                if topLine then
+                    topLine.BackgroundColor3 = accent
+                    topLine.Visible = active
+                end
             end
         end
     end
@@ -6067,7 +6467,10 @@ function buildMobileButtons()
     local function makeDrag(btn)
         local dragging, dragStart, startPos
         btn.InputBegan:Connect(function(input)
-            if Config.LockUI then return end
+            if Config.LockUI or _G.PeakHubUILocked then
+                dragging = false
+                return
+            end
             if input.UserInputType == Enum.UserInputType.MouseButton1
                 or input.UserInputType == Enum.UserInputType.Touch then
                 dragging = true
@@ -6076,7 +6479,12 @@ function buildMobileButtons()
             end
         end)
         UserInputService.InputChanged:Connect(function(input)
-            if not dragging or Config.LockUI then return end
+            -- Lock UI must freeze every side button immediately, including an in-progress drag.
+            if Config.LockUI or _G.PeakHubUILocked then
+                dragging = false
+                return
+            end
+            if not dragging or not dragStart or not startPos then return end
             if input.UserInputType == Enum.UserInputType.MouseMovement
                 or input.UserInputType == Enum.UserInputType.Touch then
                 local d = input.Position - dragStart
@@ -6089,7 +6497,10 @@ function buildMobileButtons()
         UserInputService.InputEnded:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1
                 or input.UserInputType == Enum.UserInputType.Touch then
-                if dragging then dragging = false; saveMobPos() end
+                if dragging then
+                    dragging = false
+                    if not Config.LockUI and not _G.PeakHubUILocked then saveMobPos() end
+                end
             end
         end)
     end
@@ -6105,7 +6516,8 @@ function buildMobileButtons()
         end
         btn.Position = pos
         btn.BackgroundColor3 = OFF_BG
-        btn.TextColor3 = OFF_TXT
+        -- Resolve the accent here; `accent` is local to the theme helper functions.
+        btn.TextColor3 = liveMobileAccent():Lerp(Color3.fromRGB(255, 255, 255), 0.28)
         btn.TextTransparency = 0
         btn.Font = Enum.Font.GothamBlack
         btn.TextSize = math.max(10, math.floor(12 * scale))
@@ -6133,14 +6545,15 @@ function buildMobileButtons()
         topAccent.Name = "OrangeAccent"
         topAccent.Size = UDim2.new(0.52, 0, 0, math.max(3, math.floor(4 * scale)))
         topAccent.Position = UDim2.new(0, math.floor(9 * scale), 0, math.floor(7 * scale))
-        topAccent.BackgroundColor3 = _G.PeakHubThemeAccent or OUTLINE
+        topAccent.BackgroundColor3 = liveMobileAccent()
         topAccent.BorderSizePixel = 0
         topAccent.ZIndex = btn.ZIndex + 1
         topAccent.Parent = btn
+        topAccent.Visible = false
         corner(topAccent, math.max(2, math.floor(2 * scale)))
 
         local st = Instance.new("UIStroke")
-        st.Color = _G.PeakHubThemeAccent or OUTLINE
+        st.Color = liveMobileAccent()
         st:SetAttribute("PeakHubThemeAccentStroke", true)
         st.Thickness = 1.6
         st.Transparency = 0.2
@@ -6212,12 +6625,16 @@ function buildMobileButtons()
                     Config.BatAimbot = false
                     if stopBatAimbot then stopBatAimbot() end
                     setVisual(false)
+                    if _G.PeakHubSetBatAimbotUI then pcall(_G.PeakHubSetBatAimbotUI, false) end
+                    if applyBatSpinRule then pcall(applyBatSpinRule, false) end
                     if syncAutoAntiDie then pcall(syncAutoAntiDie) end
                 else
                     State.autoBatToggled = true
                     Config.BatAimbot = true
                     if startBatAimbot then startBatAimbot() end
                     setVisual(true)
+                    if _G.PeakHubSetBatAimbotUI then pcall(_G.PeakHubSetBatAimbotUI, true) end
+                    if applyBatSpinRule then pcall(applyBatSpinRule, true) end
                     if syncAutoAntiDie then pcall(syncAutoAntiDie) end
                 end
                 saveConfig()
@@ -6263,37 +6680,8 @@ function buildMobileButtons()
     if Config.AutoRight and mobBtnRefs.autoRight then mobBtnRefs.autoRight(true) end
     if Config.BatAimbot and mobBtnRefs.autoBat then mobBtnRefs.autoBat(true) end
 
-    -- Keep active side buttons orange even if another UI refresh reapplies the selected palette.
-    task.spawn(function()
-        while gui and gui.Parent do
-            for _, btn in ipairs(gui:GetChildren()) do
-                if btn:IsA("TextButton") then
-                    local st = btn:FindFirstChildOfClass("UIStroke")
-                    local grad = btn:FindFirstChildOfClass("UIGradient")
-                    local topAccent = btn:FindFirstChild("OrangeAccent")
-                    if btn:GetAttribute("PeakHubActive") == true then
-                        btn.BackgroundColor3 = _G.PeakHubThemeAccent or OUTLINE
-                        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-                        if grad then
-                            grad.Color = ColorSequence.new({
-                                ColorSequenceKeypoint.new(0, _G.PeakHubThemeSoft or (_G.PeakHubThemeAccent or OUTLINE)),
-                                ColorSequenceKeypoint.new(1, _G.PeakHubThemeAccent or OUTLINE)
-                            })
-                        end
-                        if st then
-                            st.Color = _G.PeakHubThemeAccent or OUTLINE
-                            st.Thickness = 3
-                            st.Transparency = 0
-                        end
-                    else
-                        if st then st.Color = _G.PeakHubThemeAccent or OUTLINE end
-                        if topAccent then topAccent.BackgroundColor3 = _G.PeakHubThemeAccent or OUTLINE end
-                    end
-                end
-            end
-            task.wait(0.15)
-        end
-    end)
+    -- Reapply the selected theme after the buttons have all been created.
+    pcall(_G.PeakHubRefreshMobileButtonTheme)
 
     _G.__VyzeRefreshSafeModeMobileVisuals = function()
         local locked = Config.SafeMode and safeModeIsLocked()
@@ -6330,7 +6718,7 @@ local playerEspEnabled = false
 local playerTracersEnabled = false
 local _espConn = nil
 local _espObjects = {}
-local TRACER_COLOR = Color3.fromRGB(255, 120, 0)
+local TRACER_COLOR = _G.PeakHubThemeAccent or Color3.fromRGB(255, 120, 0)
 local TRACER_THICKNESS = 1
 local _tracerGui = nil
 
@@ -6556,6 +6944,28 @@ local ragdollCountdownEndTime = 0
 local RAGDOLL_COUNTDOWN_SECONDS = 2.6
 local ragdollCountdownGui, ragdollCountdownLabel = nil, nil
 
+-- Keep ESP, tracers, and the ragdoll countdown in sync with the selected UI accent.
+_G.PeakHubRefreshVisualAccents = function()
+    local accent = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
+    TRACER_COLOR = accent
+    for _, objects in pairs(_espObjects) do
+        if objects.highlight then
+            pcall(function()
+                objects.highlight.FillColor = accent
+                objects.highlight.OutlineColor = accent
+            end)
+        end
+        if objects.line then
+            pcall(function() objects.line.BackgroundColor3 = accent end)
+            pcall(function() objects.line.Color = accent end)
+        end
+    end
+    if ragdollCountdownLabel then
+        pcall(function() ragdollCountdownLabel.TextColor3 = accent end)
+    end
+end
+
+
 local function getRagdollCountdownAnchor(char)
     if not char then return nil end
     local preferred = {"HumanoidRootPart", "UpperTorso", "Torso", "LowerTorso", "Head", "RightUpperArm", "LeftUpperArm", "Right Arm", "Left Arm", "RightUpperLeg", "LeftUpperLeg", "Right Leg", "Left Leg"}
@@ -6592,7 +7002,7 @@ function ensureRagdollCdGui()
     lbl.Text = ""
 
     lbl.Visible = false
-    lbl.TextColor3 = Color3.fromRGB(255, 180, 80)
+    lbl.TextColor3 = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
     lbl.TextStrokeTransparency = 0.1
     lbl.TextStrokeColor3 = Color3.new(0, 0, 0)
     lbl.Font = Enum.Font.GothamBlack

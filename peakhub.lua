@@ -7843,38 +7843,43 @@ function playVyzeIntro()
     local introActive = true
 
 
-    local INTRO_SONG_URL = "https://files.catbox.moe/siru6c.mp3"
-    local INTRO_SONG_FILE = "VyzeIntro_Song.mp3"
     local snd = Instance.new("Sound")
     snd.Name = "PeakHubIntroMusic"
-    snd.SoundId = INTRO_SONG_URL
-    snd.Volume = 1
+    snd.SoundId = "rbxassetid://126107591945718"
+    snd.Volume = 0.7
     snd.Looped = false
-    snd.Parent = gui
-    pcall(function() snd:Play() end)
-    task.spawn(function()
-        pcall(function()
-            local alreadyReady = isfile and isfile(INTRO_SONG_FILE)
-            if not alreadyReady and writefile then
-                local data = game:HttpGet(INTRO_SONG_URL)
-                if data and #data > 100 then writefile(INTRO_SONG_FILE, data) end
-            end
-            local localId
-            if isfile and isfile(INTRO_SONG_FILE) then
-                if getcustomasset then localId = getcustomasset(INTRO_SONG_FILE)
-                elseif getsynasset then localId = getsynasset(INTRO_SONG_FILE) end
-            end
+    snd.RollOffMode = Enum.RollOffMode.InverseTapered
+    snd.RollOffMinDistance = 10000
+    snd.RollOffMaxDistance = 10000
+    snd.TimePosition = 34
+    snd.Parent = game:GetService("SoundService")
 
-            if localId and not snd.IsPlaying then
-                snd.SoundId = tostring(localId)
-                snd:Play()
+    task.spawn(function()
+        if not snd.IsLoaded then
+            local loaded = false
+            task.spawn(function()
+                pcall(function() snd.Loaded:Wait() end)
+                loaded = true
+            end)
+            local t = 0
+            while not loaded and t < 0.5 do
+                task.wait(0.05)
+                t = t + 0.05
             end
-        end)
+        end
+        if introActive and snd.Parent then
+            pcall(function() snd:Play() end)
+            task.delay(5, function()
+                pcall(function() snd:Stop() end)
+                pcall(function() snd:Destroy() end)
+            end)
+        else
+            pcall(function() snd:Destroy() end)
+        end
     end)
     gui.Destroying:Connect(function()
         pcall(function() snd:Stop(); snd:Destroy() end)
     end)
-
 
     local skipBtn = Instance.new("TextButton", gui)
     skipBtn.Size = UDim2.new(0, 130, 0, 38)
@@ -8008,6 +8013,30 @@ function playVyzeIntro()
         ColorSequenceKeypoint.new(1, introAccent:Lerp(Color3.fromRGB(255, 255, 255), 0.28)),
     })
 
+    -- Small divider and creator credit directly below the PEAK HUB title.
+    local introDivider = Instance.new("Frame", gui)
+    introDivider.Name = "PeakHubIntroDivider"
+    introDivider.AnchorPoint = Vector2.new(0.5, 0.5)
+    introDivider.Size = UDim2.new(0, 170, 0, 2)
+    introDivider.Position = UDim2.new(0.5, 0, 0.585, 0)
+    introDivider.BackgroundColor3 = introAccent
+    introDivider.BackgroundTransparency = 1
+    introDivider.BorderSizePixel = 0
+    introDivider.ZIndex = 15
+
+    local creatorCredit = Instance.new("TextLabel", gui)
+    creatorCredit.Name = "PeakHubIntroCreatorCredit"
+    creatorCredit.AnchorPoint = Vector2.new(0.5, 0.5)
+    creatorCredit.Size = UDim2.new(1, -40, 0, 28)
+    creatorCredit.Position = UDim2.new(0.5, 0, 0.625, 0)
+    creatorCredit.BackgroundTransparency = 1
+    creatorCredit.Text = "by axis / by espo"
+    creatorCredit.TextColor3 = Color3.fromRGB(255, 255, 255)
+    creatorCredit.Font = Enum.Font.GothamMedium
+    creatorCredit.TextSize = 16
+    creatorCredit.TextTransparency = 1
+    creatorCredit.ZIndex = 15
+
 
     local function bw(word, yp, tc, sz, sp)
         local co = Instance.new("Frame", gui)
@@ -8079,6 +8108,8 @@ function playVyzeIntro()
     task.delay(0.05, function()
         if introActive then
             tn(peakTitle, 0.55, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, {TextTransparency = 0}):Play()
+            tn(introDivider, 0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, {BackgroundTransparency = 0}):Play()
+            tn(creatorCredit, 0.55, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, {TextTransparency = 0}):Play()
         end
     end)
 
@@ -8097,6 +8128,8 @@ function playVyzeIntro()
             tn(lt, 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {TextTransparency = 1}):Play()
         end
         tn(peakTitle, 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {TextTransparency = 1}):Play()
+        tn(introDivider, 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {BackgroundTransparency = 1}):Play()
+        tn(creatorCredit, 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {TextTransparency = 1}):Play()
     end)
     task.delay(2.35, function()
         if not introActive then return end

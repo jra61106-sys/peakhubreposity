@@ -1,3 +1,6 @@
+
+
+
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -1085,10 +1088,16 @@ function toggleRow(parent, labelText, defaultOn, onToggle, initialKey, onKeyChan
         end
     end
 
+    -- Debounce Activated: gamepad focus/selection can occasionally fire twice,
+    -- making the toggle appear ON and immediately flip back OFF.
+    local lastToggleActivation = 0
     track.Activated:Connect(function()
-        on = not on
-        setVisual(on)
-        if onToggle then onToggle(on) end
+        local now = os.clock()
+        if now - lastToggleActivation < 0.28 then return end
+        lastToggleActivation = now
+        local nextState = not on
+        setVisual(nextState)
+        if onToggle then onToggle(nextState) end
         saveConfig()
     end)
 
@@ -2276,7 +2285,7 @@ if not _G.__VyzeSafeModeMonitorStarted then _G.__VyzeSafeModeMonitorStarted=true
 local misc = makePage("Misc")
 sectionLabel(misc, "JUMP")
 toggleRow(misc, "Infinite Jump", Config.InfiniteJump, function(state)
-    Config.InfiniteJump = state
+    Config.InfiniteJump = state == true
     saveConfig()
 end)
 toggleRow(misc, "Anti Ragdoll", Config.AntiRagdoll, function(state)
@@ -2551,10 +2560,11 @@ local function peakSetupBatSkinEffects(tool, skin, folder)
     if not swingSound then
         swingSound = Instance.new("Sound")
         swingSound.Name = "PeakBatSwingSound"
-        swingSound.Volume = 0.8
+        swingSound.Volume = 0.18
         swingSound.PlaybackSpeed = 1
         swingSound.Parent = handle
     end
+    swingSound.Volume = 0.18 -- Swing più basso per lasciare in evidenza il suono dell'hit.
     swingSound.SoundId = PEAK_BAT_SKIN_SOUNDS[skin] or "rbxassetid://111808555599832"
 
     -- L'attivazione del tool arma una finestra breve; il suono parte solo
@@ -3995,10 +4005,14 @@ local function isInfiniteJumpGamepad(input)
         or t == Enum.UserInputType.Gamepad7 or t == Enum.UserInputType.Gamepad8
 end
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed or UserInputService:GetFocusedTextBox() then return end
+    if UserInputService:GetFocusedTextBox() then return end
+    -- Roblox may mark the gamepad's default jump input as processed.
+    -- Still track ButtonA for Infinite Jump while preserving the processed-input guard for other controls.
     if input.KeyCode == Enum.KeyCode.ButtonA and isInfiniteJumpGamepad(input) then
         infiniteJumpGamepadHeld = true
+        return
     end
+    if gameProcessed then return end
 end)
 UserInputService.InputEnded:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.ButtonA and isInfiniteJumpGamepad(input) then
@@ -6307,6 +6321,7 @@ function buildMobileButtons()
 
 
     local OFF_BG = Color3.fromRGB(18, 18, 20)
+    local BLACK = Color3.fromRGB(0, 0, 0)
     -- OFF labels follow the outline accent; ON labels use a contrasting color.
     local function mobileContrastText(color)
         local function linearChannel(v)
@@ -6378,26 +6393,33 @@ function buildMobileButtons()
         local st = btn:FindFirstChildOfClass("UIStroke")
         local grad = btn:FindFirstChildOfClass("UIGradient")
         local topLine = btn:FindFirstChild("OrangeAccent")
+        local innerStroke = btn:FindFirstChild("PeakHubInnerAccent")
         local accent = liveMobileAccent()
         local soft = liveMobileSoft()
+        local themeHighlight = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.24)
         if on then
             btn:SetAttribute("PeakHubActive", true)
             btn.BackgroundColor3 = accent
-            btn.TextColor3 = mobileContrastText(accent)
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
             btn.TextTransparency = 0
             btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
             btn.TextStrokeTransparency = 1
             if topLine then
-                topLine.BackgroundColor3 = accent
+                topLine.BackgroundColor3 = themeHighlight
                 topLine.Visible = true
+            end
+            if innerStroke then
+                innerStroke.Color = themeHighlight
+                innerStroke.Thickness = 1.5
+                innerStroke.Transparency = 0
             end
             if grad then
                 -- A UIGradient on a TextButton also affects its text; keep labels readable.
                 grad.Enabled = false
             end
             if st then
-                st.Color = accent
-                st.Thickness = 3
+                st.Color = BLACK -- black outline when ON
+                st.Thickness = 3.5
                 st.Transparency = 0
                 st:SetAttribute("PeakHubThemeAccentStroke", true)
             end
@@ -6412,6 +6434,11 @@ function buildMobileButtons()
             if topLine then
                 topLine.BackgroundColor3 = accent
                 topLine.Visible = false
+            end
+            if innerStroke then
+                innerStroke.Color = accent
+                innerStroke.Thickness = 1
+                innerStroke.Transparency = 0.55
             end
             if grad then
                 -- Do not let the background gradient tint the button text.
@@ -6430,15 +6457,17 @@ function buildMobileButtons()
     _G.PeakHubRefreshMobileButtonTheme = function()
         local accent = liveMobileAccent()
         local soft = liveMobileSoft()
+        local themeHighlight = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.24)
         for _, btn in ipairs(gui:GetChildren()) do
             if btn:IsA("TextButton") then
                 local active = btn:GetAttribute("PeakHubActive") == true
                 local st = btn:FindFirstChildOfClass("UIStroke")
                 local grad = btn:FindFirstChildOfClass("UIGradient")
                 local topLine = btn:FindFirstChild("OrangeAccent")
+                local innerStroke = btn:FindFirstChild("PeakHubInnerAccent")
                 btn.BackgroundColor3 = active and accent or OFF_BG
                 -- Never let theme accents darken OFF labels; keep them pure white.
-                btn.TextColor3 = active and mobileContrastText(accent) or Color3.fromRGB(255, 255, 255)
+                btn.TextColor3 = Color3.fromRGB(255, 255, 255)
                 btn.TextTransparency = 0
                 btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
                 btn.TextStrokeTransparency = 1
@@ -6447,14 +6476,19 @@ function buildMobileButtons()
                     grad.Enabled = false
                 end
                 if st then
-                    st.Color = accent
-                    st.Thickness = active and 3 or 1.8
+                    st.Color = active and BLACK or accent
+                    st.Thickness = active and 3.5 or 1.8
                     st.Transparency = active and 0 or 0.05
                     st:SetAttribute("PeakHubThemeAccentStroke", true)
                 end
                 if topLine then
-                    topLine.BackgroundColor3 = accent
+                    topLine.BackgroundColor3 = themeHighlight
                     topLine.Visible = active
+                end
+                if innerStroke then
+                    innerStroke.Color = active and themeHighlight or accent
+                    innerStroke.Thickness = active and 1.5 or 1
+                    innerStroke.Transparency = active and 0 or 0.55
                 end
             end
         end
@@ -6549,6 +6583,27 @@ function buildMobileButtons()
         topAccent.Parent = btn
         topAccent.Visible = false
         corner(topAccent, math.max(2, math.floor(2 * scale)))
+
+        -- Decorative glossy highlight kept separate from the label so it never darkens text.
+        local shine = Instance.new("Frame")
+        shine.Name = "PeakHubGloss"
+        shine.Size = UDim2.new(0.72, 0, 0, math.max(2, math.floor(2 * scale)))
+        shine.Position = UDim2.new(0.14, 0, 0, math.floor(4 * scale))
+        shine.BackgroundColor3 = Color3.fromRGB(255, 220, 150)
+        shine.BackgroundTransparency = 0.12
+        shine.BorderSizePixel = 0
+        shine.ZIndex = btn.ZIndex + 1
+        shine.Parent = btn
+        corner(shine, math.max(2, math.floor(2 * scale)))
+
+        -- Thin vivid orange inset border for a more detailed, layered button look.
+        local innerStroke = Instance.new("UIStroke")
+        innerStroke.Name = "PeakHubInnerAccent"
+        innerStroke.Color = themeHighlight
+        innerStroke.Thickness = 1
+        innerStroke.Transparency = 0.12
+        innerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        innerStroke.Parent = btn
 
         local st = Instance.new("UIStroke")
         st.Color = liveMobileAccent()

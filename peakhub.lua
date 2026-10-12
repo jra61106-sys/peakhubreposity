@@ -106,6 +106,7 @@ local Config = {
     BatAimbotKey = "H",
     AimbotSpeed = 58,
     AutoSwing = true,
+    AutoBrainrot = false,
     MirrorTPDown = false,
     NoCamCollision = true,
     AutoSteal = false,
@@ -667,6 +668,19 @@ function syncMiniState()
     end
 end
 
+-- Restore the intro progress-line track; this was referenced below without being created.
+local lineTrack = Instance.new("Frame")
+lineTrack.Name = "IntroLineTrack"
+lineTrack.Size = UDim2.new(0, 180, 0, 2)
+lineTrack.Position = UDim2.new(0.5, -90, 1, -18)
+lineTrack.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+lineTrack.BackgroundTransparency = 0.25
+lineTrack.BorderSizePixel = 0
+lineTrack.ClipsDescendants = true
+lineTrack.ZIndex = 3
+lineTrack.Parent = main
+corner(lineTrack, 1)
+
 local movingLine = Instance.new("Frame")
 movingLine.Name = "MovingLine"
 movingLine.Size = UDim2.new(0, 90, 1, 0)
@@ -689,6 +703,7 @@ task.spawn(function()
     local x = -90
     RunService.RenderStepped:Connect(function(dt)
         x = x + speed * dt
+        if not lineTrack or not lineTrack.Parent then return end
         local trackWidth = lineTrack.AbsoluteSize.X
         if x > trackWidth then
             x = -90
@@ -815,13 +830,13 @@ function rowBase(parent, labelText, accent)
     row.MouseEnter:Connect(function()
         if row:GetAttribute("GlowOn") then return end
         TweenService:Create(row, TweenInfo.new(0.12), {BackgroundColor3 = peakHubSoftColor()}):Play()
-        rowStroke.Color = peakHubAccentColor()
+        rowStroke.Color = COLORS.Stroke
         TweenService:Create(rowStroke, TweenInfo.new(0.12), {Transparency = 0.15}):Play()
     end)
     row.MouseLeave:Connect(function()
         if row:GetAttribute("GlowOn") then return end
         TweenService:Create(row, TweenInfo.new(0.15), {BackgroundColor3 = COLORS.Row}):Play()
-        rowStroke.Color = peakHubAccentColor()
+        rowStroke.Color = COLORS.Stroke
         TweenService:Create(rowStroke, TweenInfo.new(0.15), {Transparency = 0.45}):Play()
     end)
 
@@ -2105,7 +2120,7 @@ local function peakEquipBatOnce()
     return false
 end
 
-toggleWithKeybindRow(combat, "Bat Aimbot", Config.BatAimbot, Config.BatAimbotKey, function(state)
+local batAimbotRow = toggleWithKeybindRow(combat, "Bat Aimbot", Config.BatAimbot, Config.BatAimbotKey, function(state)
     Config.BatAimbot = state
     State.autoBatToggled = state
     if mobBtnRefs and mobBtnRefs.autoBat then pcall(mobBtnRefs.autoBat, state) end
@@ -2121,15 +2136,26 @@ end, function(key)
     Config.BatAimbotKey = key
 end)
 
+-- Bat Aimbot uses the same neutral row outline as the other rows (never orange).
+if typeof(batAimbotRow) == "Instance" then
+    local batStroke = batAimbotRow:FindFirstChild("RowStroke")
+    if batStroke then
+        batStroke.Color = COLORS.Stroke
+        batStroke:SetAttribute("PeakHubThemeAccentStroke", false)
+        batStroke.Transparency = 0.45
+    end
+end
+
 local aimbotSpeedRow = rowBase(combat, "Aimbot Speed", false)
 numberBadge(aimbotSpeedRow, Config.AimbotSpeed, -60, 44, function(val)
     Config.AimbotSpeed = val
 end)
 
-toggleRow(combat, "Auto Swing", Config.AutoSwing, function(state)
+local autoSwingRow, setAutoSwingVisual = toggleRow(combat, "Auto Swing", Config.AutoSwing, function(state)
     Config.AutoSwing = state
     if state then peakEquipBatOnce() end
 end)
+
 
 toggleRow(combat, "Mirror TP Down", Config.MirrorTPDown, function(state)
     Config.MirrorTPDown = state
@@ -2340,17 +2366,137 @@ spinRow, setSpinGuiVisual = toggleRow(misc, "Spin", Config.Spin, function(state)
         if stopSpin then pcall(stopSpin) end
         if setSpinGuiVisual then pcall(setSpinGuiVisual, false) end
     else
-        Config.Spin = state == true
+        if Config.AutoBrainrot then
+            -- Auto Brainrot owns Spin while enabled: no equipped item means Spin stays OFF.
+            Config.Spin = state == true and characterHasBrainrotEquipped()
+        else
+            Config.Spin = state == true
+        end
         if Config.Spin then
             if startSpin then pcall(startSpin) end
         else
             if stopSpin then pcall(stopSpin) end
         end
+        if setSpinGuiVisual then pcall(setSpinGuiVisual, Config.Spin) end
     end
     -- Spin always requests Anti Die, regardless of the Anti Die UI toggle.
     if syncAutoAntiDie then pcall(syncAutoAntiDie) end
     saveConfig()
 end)
+
+
+-- Auto Brainrot sub-row directly beneath Spin; it enables Spin only while an item is equipped.
+local autoBrainrotRow, setAutoBrainrotVisual
+local autoBrainrotExpanded = false
+local autoBrainrotExpandButton = Instance.new("TextButton")
+autoBrainrotExpandButton.Name = "AutoBrainrotExpand"
+autoBrainrotExpandButton.Size = UDim2.new(0, 22, 0, 22)
+autoBrainrotExpandButton.Position = UDim2.new(1, -88, 0.5, -11)
+autoBrainrotExpandButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+autoBrainrotExpandButton.BackgroundTransparency = 0
+autoBrainrotExpandButton.BorderSizePixel = 0
+autoBrainrotExpandButton.AutoButtonColor = false
+autoBrainrotExpandButton.Text = ">"
+autoBrainrotExpandButton.TextColor3 = _G.PeakHubThemeAccent or peakHubAccentColor()
+autoBrainrotExpandButton.TextSize = 20
+autoBrainrotExpandButton.Font = Enum.Font.GothamBold
+autoBrainrotExpandButton.Parent = spinRow
+local spinTrack = spinRow:FindFirstChildWhichIsA("TextButton")
+if spinTrack then
+    spinTrack.Position = UDim2.new(1, -60, 0.5, -12)
+end
+corner(autoBrainrotExpandButton, 6)
+local autoBrainrotExpandStroke = stroke(autoBrainrotExpandButton, 1.2, _G.PeakHubThemeAccent or peakHubAccentColor(), 0.15)
+autoBrainrotExpandButton.Activated:Connect(function()
+    autoBrainrotExpanded = not autoBrainrotExpanded
+    autoBrainrotExpandButton.Text = autoBrainrotExpanded and "⌄" or "›"
+    autoBrainrotExpandButton.TextColor3 = _G.PeakHubThemeAccent or peakHubAccentColor()
+    autoBrainrotExpandStroke.Color = _G.PeakHubThemeAccent or peakHubAccentColor()
+    if autoBrainrotRow then
+        autoBrainrotRow.Visible = autoBrainrotExpanded
+    end
+end)
+
+-- Auto Brainrot: the option is enabled by the user, but its active state follows
+-- whether a brainrot/carry item is actually equipped in the character.
+local autoBrainrotSwingVisual
+local autoBrainrotActive = false
+local autoBrainrotConn
+local function characterHasBrainrotEquipped()
+    local character = LP.Character
+    if not character then return false end
+
+    -- Only detect a carried/stolen brainrot, never a normal weapon Tool.
+    local okSteal, stealing = pcall(function()
+        return LP:GetAttribute("Stealing") == true
+            or character:GetAttribute("Stealing") == true
+    end)
+    if okSteal and stealing then return true end
+
+    -- Reuse the carry detector, which checks carry flags and brainrot/animal models.
+    if _GACC and type(_GACC.autoCarryDetect) == "function" then
+        local ok, carrying = pcall(_GACC.autoCarryDetect)
+        if ok and carrying == true then return true end
+    end
+
+    -- Fallback: a brainrot/animal model attached directly to the character.
+    for _, item in ipairs(character:GetChildren()) do
+        if item:IsA("Model") then
+            local name = item.Name:lower()
+            if (name:find("brainrot", 1, true) or name:find("animal", 1, true))
+                and item:FindFirstChildWhichIsA("BasePart", true) then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+local function updateAutoBrainrot()
+    -- Desired behavior: with Auto Brainrot enabled, Spin is OFF with empty hands
+    -- and turns ON as soon as an item/tool is equipped; it turns OFF again on unequip.
+    local shouldBeActive = Config.AutoBrainrot == true and characterHasBrainrotEquipped()
+    local stateChanged = shouldBeActive ~= autoBrainrotActive
+    local spinOutOfSync = (Config.Spin == true) ~= shouldBeActive
+    autoBrainrotActive = shouldBeActive
+
+    -- Re-assert the desired state every heartbeat so another Spin handler cannot
+    -- leave Spin ON while no item is held (or OFF while one is held).
+    if stateChanged or spinOutOfSync then
+        Config.Spin = shouldBeActive
+        if shouldBeActive then
+            if startSpin then pcall(startSpin) end
+        else
+            if stopSpin then pcall(stopSpin) end
+        end
+        if setSpinGuiVisual then pcall(setSpinGuiVisual, shouldBeActive) end
+        if syncAutoAntiDie then pcall(syncAutoAntiDie) end
+    end
+end
+
+autoBrainrotRow, setAutoBrainrotVisual = toggleRow(misc, "    Auto Brainrot", Config.AutoBrainrot, function(state)
+    Config.AutoBrainrot = state == true
+    if not state then
+        autoBrainrotActive = false
+        Config.Spin = false
+        if stopSpin then pcall(stopSpin) end
+        if setSpinGuiVisual then pcall(setSpinGuiVisual, false) end
+        if syncAutoAntiDie then pcall(syncAutoAntiDie) end
+    else
+        updateAutoBrainrot()
+    end
+    saveConfig()
+end)
+autoBrainrotRow.Visible = false
+autoBrainrotRow.LayoutOrder = spinRow.LayoutOrder + 1
+autoBrainrotSwingVisual = function(state)
+    -- Reflect Auto Swing's state without triggering the toggle callback.
+    -- The row's own visual is managed by its normal user toggle.
+end
+if autoBrainrotConn then autoBrainrotConn:Disconnect() end
+autoBrainrotConn = RunService.Heartbeat:Connect(updateAutoBrainrot)
+
 
 applyBatSpinRule = function(enabled)
     if enabled then
@@ -3084,7 +3230,13 @@ do
         for _, obj in ipairs(screenGui:GetDescendants()) do
             if obj:IsA("UIStroke") and obj.Parent then
                 local parentName = obj.Parent.Name
-                if obj.Name == "RowStroke"
+                local isBatAimbotRowStroke = obj.Name == "RowStroke" and obj.Parent and obj.Parent:IsA("Frame") and (function()
+                    for _, child in ipairs(obj.Parent:GetChildren()) do
+                        if child:IsA("TextLabel") and child.Text == "Bat Aimbot" then return true end
+                    end
+                    return false
+                end)()
+                if (obj.Name == "RowStroke" and not isBatAimbotRowStroke)
                     or obj:GetAttribute("PeakHubThemeAccentStroke") == true
                     or parentName == "Toggle" or parentName == "Track" or parentName == "ToggleStroke" then
                     obj:SetAttribute("PeakHubThemeAccentStroke", true)
@@ -3098,8 +3250,21 @@ do
             if obj:IsA("Frame") then
                 local rowStroke = obj:FindFirstChild("RowStroke")
                 if rowStroke and rowStroke:IsA("UIStroke") then
-                    rowStroke.Color = theme.accent
-                    rowStroke:SetAttribute("PeakHubThemeAccentStroke", true)
+                    local isBatAimbotRow = false
+                    for _, child in ipairs(obj:GetChildren()) do
+                        if child:IsA("TextLabel") and child.Text == "Bat Aimbot" then
+                            isBatAimbotRow = true
+                            break
+                        end
+                    end
+                    if isBatAimbotRow then
+                        rowStroke.Color = COLORS.Stroke
+                        rowStroke:SetAttribute("PeakHubThemeAccentStroke", false)
+                        rowStroke.Transparency = 0.45
+                    else
+                        rowStroke.Color = theme.accent
+                        rowStroke:SetAttribute("PeakHubThemeAccentStroke", true)
+                    end
                 end
             end
         end
@@ -3916,12 +4081,26 @@ end
 
 -- Spin has one fixed setting: Very Fast (0.90), with no speed selector.
 local spinConn = nil
+local spinOldAutoRotate = nil
+local spinHumanoid = nil
 startSpin = function()
     if spinConn then spinConn:Disconnect(); spinConn = nil end
+    spinHumanoid = nil
+    spinOldAutoRotate = nil
     spinConn = RunService.Heartbeat:Connect(function()
         if not Config.Spin then return end
         local char = LP.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
         local root = char and char:FindFirstChild("HumanoidRootPart")
+        if hum and hum ~= spinHumanoid then
+            if spinHumanoid and spinOldAutoRotate ~= nil then
+                pcall(function() spinHumanoid.AutoRotate = spinOldAutoRotate end)
+            end
+            spinHumanoid = hum
+            spinOldAutoRotate = hum.AutoRotate
+            -- Prevent Shift Lock's character-facing controller from fighting the spin.
+            pcall(function() hum.AutoRotate = false end)
+        end
         if root then
             pcall(function()
                 root.CFrame = root.CFrame * CFrame.Angles(0, 0.90, 0)
@@ -3932,6 +4111,11 @@ end
 
 stopSpin = function()
     if spinConn then spinConn:Disconnect(); spinConn = nil end
+    if spinHumanoid and spinOldAutoRotate ~= nil then
+        pcall(function() spinHumanoid.AutoRotate = spinOldAutoRotate end)
+    end
+    spinHumanoid = nil
+    spinOldAutoRotate = nil
 end
 
 syncAutoAntiDie = function()
@@ -6369,8 +6553,8 @@ function buildMobileButtons()
         {key="reset",        label="INSTA\nRESET",   toggle=false, col=0, row=0},
         {key="drop",         label="DROP\nBR",        toggle=false, col=1, row=0},
         {key="autoLeft",     label="AUTO\nLEFT",     toggle=true,  col=2, row=0},
-        {key="autoBat",      label="BAT\nAIMBOT",    toggle=true,  col=0, row=1},
-        {key="autoRight",    label="AUTO\nRIGHT",    toggle=true,  col=1, row=1},
+        {key="autoBat",      label="BAT\nAIMBOT",    toggle=true,  col=1, row=1},
+        {key="autoRight",    label="AUTO\nRIGHT",    toggle=true,  col=2, row=1},
         {key="tpDown",       label="TP\nDOWN",        toggle=false, col=1, row=2},
         {key="carrySpeed",   label="CARRY\nSPEED",   toggle=true,  col=2, row=2},
         {key="laggerCarry",  label="LAGGER\nCARRY",  toggle=true,  col=1, row=3},
@@ -6461,11 +6645,13 @@ function buildMobileButtons()
         for _, btn in ipairs(gui:GetChildren()) do
             if btn:IsA("TextButton") then
                 local active = btn:GetAttribute("PeakHubActive") == true
+                -- Every OFF mobile button uses the same near-black background.
+                local offColor = OFF_BG
                 local st = btn:FindFirstChildOfClass("UIStroke")
                 local grad = btn:FindFirstChildOfClass("UIGradient")
                 local topLine = btn:FindFirstChild("OrangeAccent")
                 local innerStroke = btn:FindFirstChild("PeakHubInnerAccent")
-                btn.BackgroundColor3 = active and accent or OFF_BG
+                btn.BackgroundColor3 = active and accent or offColor
                 -- Never let theme accents darken OFF labels; keep them pure white.
                 btn.TextColor3 = Color3.fromRGB(255, 255, 255)
                 btn.TextTransparency = 0
@@ -6540,10 +6726,6 @@ function buildMobileButtons()
         btn.Name = def.key
         btn.Size = UDim2.new(0, BTN_W, 0, BTN_H)
         local pos = defaultPos(def)
-        local s = saved[def.key]
-        if s and type(s.ox) == "number" then
-            pos = UDim2.new(s.sx or 0, s.ox, s.sy or 0, s.oy)
-        end
         btn.Position = pos
         btn.BackgroundColor3 = OFF_BG
         -- Resolve the accent here; `accent` is local to the theme helper functions.
@@ -6599,7 +6781,9 @@ function buildMobileButtons()
         -- Thin vivid orange inset border for a more detailed, layered button look.
         local innerStroke = Instance.new("UIStroke")
         innerStroke.Name = "PeakHubInnerAccent"
-        innerStroke.Color = themeHighlight
+        -- Compute this highlight in the button-creation scope; the helper-local
+        -- themeHighlight variable is not visible here.
+        innerStroke.Color = liveMobileAccent():Lerp(Color3.fromRGB(255, 255, 255), 0.24)
         innerStroke.Thickness = 1
         innerStroke.Transparency = 0.12
         innerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
@@ -6760,7 +6944,10 @@ _G.VyzeResetMobileButtons = function()
     buildMobileButtons()
 end
 
-buildMobileButtons()
+local mobileBuildOK, mobileBuildError = pcall(buildMobileButtons)
+if not mobileBuildOK then
+    warn("[Peak Hub] Mobile button creation failed: " .. tostring(mobileBuildError))
+end
 
 
 
@@ -7707,16 +7894,8 @@ function ensureOverheadLabels(char)
     bb.AlwaysOnTop = true
     bb.MaxDistance = 200
     bb.Adornee = anchor
-    local parented = false
-    pcall(function()
-        if gethui then bb.Parent = gethui(); parented = bb.Parent ~= nil end
-    end)
-    if not parented then
-        pcall(function() bb.Parent = game:GetService("CoreGui") end)
-    end
-    if not bb.Parent then
-        bb.Parent = LP:WaitForChild("PlayerGui")
-    end
+    -- Parent directly to the character anchor so the overhead labels render reliably.
+    bb.Parent = anchor
     overheadGui = bb
 
     bb.Size = UDim2.new(0, 240, 0, 90)

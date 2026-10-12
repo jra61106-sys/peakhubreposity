@@ -1,6 +1,3 @@
-
-
-
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -607,13 +604,13 @@ function restoreFromMini()
     saveConfig()
 end
 
-minimizeButton.MouseButton1Click:Connect(function()
+minimizeButton.Activated:Connect(function()
     showMiniOnly()
 end)
 
 miniRestoreButton.Active = true
 miniRestoreButton.Selectable = true
-miniRestoreButton.MouseButton1Click:Connect(function()
+miniRestoreButton.Activated:Connect(function()
     if miniDragged then
         miniDragged = false
         return
@@ -896,7 +893,7 @@ function keybindBadge(parent, initialText, offsetX, width, onKeyChanged)
     local listening = false
     local currentValue = tostring(initialText)
 
-    btn.MouseButton1Click:Connect(function()
+    btn.Activated:Connect(function()
         if listening then return end
         listening = true
         keybindCaptureActive = true
@@ -980,7 +977,7 @@ function numberBadge(parent, initialValue, offsetX, width, onChanged)
 
     local currentValue = formatSpeedNum(initialValue)
 
-    btn.MouseButton1Click:Connect(function()
+    btn.Activated:Connect(function()
         local box = Instance.new("TextBox")
         box.Text = currentValue
         box.Font = Enum.Font.GothamBold
@@ -1088,7 +1085,7 @@ function toggleRow(parent, labelText, defaultOn, onToggle, initialKey, onKeyChan
         end
     end
 
-    track.MouseButton1Click:Connect(function()
+    track.Activated:Connect(function()
         on = not on
         setVisual(on)
         if onToggle then onToggle(on) end
@@ -1129,7 +1126,7 @@ function toggleWithKeybindRow(parent, labelText, defaultOn, initialKey, onToggle
 
     local on = defaultOn
     setRowGlow(row, defaultOn == true)
-    track.MouseButton1Click:Connect(function()
+    track.Activated:Connect(function()
         on = not on
         local info = TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
         TweenService:Create(knob, info, {
@@ -1214,7 +1211,7 @@ function toggleWithNumberRow(parent, labelText, defaultOn, initialVal, onToggle,
     end
 
     setVisual(on)
-    track.MouseButton1Click:Connect(function()
+    track.Activated:Connect(function()
         setVisual(not on)
         if onToggle then onToggle(on) end
         saveConfig()
@@ -1284,8 +1281,8 @@ function cycleSelectorRow(parent, labelText, options, currentValue, onChanged)
         if onChanged then onChanged(opts[idx]) end
     end
 
-    left.MouseButton1Click:Connect(function() setIndex(idx - 1) end)
-    right.MouseButton1Click:Connect(function() setIndex(idx + 1) end)
+    left.Activated:Connect(function() setIndex(idx - 1) end)
+    right.Activated:Connect(function() setIndex(idx + 1) end)
 
     return {
         set = function(val)
@@ -1409,7 +1406,7 @@ function modeButtonsRow(parent, options, currentOption, onSelected)
             if st2 then TweenService:Create(st2, TweenInfo.new(0.12), {Transparency = 0.45}):Play() end
         end)
 
-        btn.MouseButton1Click:Connect(function()
+        btn.Activated:Connect(function()
             if currentOption == opt then return end
             currentOption = opt
 
@@ -2241,7 +2238,7 @@ for index, percent in ipairs(stopAtChoices) do
     local stopAtStroke = stroke(button, 1.2, peakHubSoftColor(), 0.45)
     stopAtStroke:SetAttribute("PeakHubThemeAccentStroke", true)
     stopAtButtons[percent] = button
-    button.MouseButton1Click:Connect(function()
+    button.Activated:Connect(function()
         Config.AutoStealStopAt = percent
         refreshStopAtButtons()
         saveConfig()
@@ -3249,8 +3246,8 @@ do
             pcall(function() applyBackgroundTheme(Config.UIBackgroundIndex) end)
         end)
     end
-    mkBackgroundArrow("<", -156).MouseButton1Click:Connect(function() setBackgroundIndex(math.max(1, Config.UIBackgroundIndex - 1)) end)
-    mkBackgroundArrow(">", -64).MouseButton1Click:Connect(function() setBackgroundIndex(math.min(12, Config.UIBackgroundIndex + 1)) end)
+    mkBackgroundArrow("<", -156).Activated:Connect(function() setBackgroundIndex(math.max(1, Config.UIBackgroundIndex - 1)) end)
+    mkBackgroundArrow(">", -64).Activated:Connect(function() setBackgroundIndex(math.min(12, Config.UIBackgroundIndex + 1)) end)
     setBackgroundIndex(Config.UIBackgroundIndex)
     task.defer(function()
         pcall(function() applyBackgroundTheme(Config.UIBackgroundIndex) end)
@@ -3286,12 +3283,12 @@ do
     end
     local left = mkArr("<", -156)
     local right = mkArr(">", -64)
-    left.MouseButton1Click:Connect(function()
+    left.Activated:Connect(function()
         applyUIScale(Config.UIScale - 5)
         valLbl.Text = tostring(Config.UIScale)
         saveConfig()
     end)
-    right.MouseButton1Click:Connect(function()
+    right.Activated:Connect(function()
         applyUIScale(Config.UIScale + 5)
         valLbl.Text = tostring(Config.UIScale)
         saveConfig()
@@ -3329,13 +3326,13 @@ do
     end
     local left = mkArr("<", -156)
     local right = mkArr(">", -64)
-    left.MouseButton1Click:Connect(function()
+    left.Activated:Connect(function()
         Config.StealBarSize = math.clamp((Config.StealBarSize or 50) - 5, 35, 90)
         valLbl.Text = tostring(Config.StealBarSize)
         if StealSys and StealSys.applyBarSize then StealSys.applyBarSize() end
         saveConfig()
     end)
-    right.MouseButton1Click:Connect(function()
+    right.Activated:Connect(function()
         Config.StealBarSize = math.clamp((Config.StealBarSize or 50) + 5, 35, 90)
         valLbl.Text = tostring(Config.StealBarSize)
         if StealSys and StealSys.applyBarSize then StealSys.applyBarSize() end
@@ -3394,13 +3391,13 @@ do
     end
     local left = mkArr("<", -156)
     local right = mkArr(">", -64)
-    left.MouseButton1Click:Connect(function()
+    left.Activated:Connect(function()
         Config.MobileButtonSize = math.clamp((Config.MobileButtonSize or 50) - 5, 10, 125)
         valLbl.Text = tostring(Config.MobileButtonSize)
         if _G.VyzeApplyMobileButtonSize then pcall(_G.VyzeApplyMobileButtonSize) end
         saveConfig()
     end)
-    right.MouseButton1Click:Connect(function()
+    right.Activated:Connect(function()
         Config.MobileButtonSize = math.clamp((Config.MobileButtonSize or 50) + 5, 10, 125)
         valLbl.Text = tostring(Config.MobileButtonSize)
         if _G.VyzeApplyMobileButtonSize then pcall(_G.VyzeApplyMobileButtonSize) end
@@ -3427,7 +3424,7 @@ do
     btn.TextColor3 = COLORS.White
     btn.Parent = row
     corner(btn, 8)
-    btn.MouseButton1Click:Connect(function()
+    btn.Activated:Connect(function()
         if _G.VyzeResetMobileButtons then pcall(_G.VyzeResetMobileButtons) end
         btn.Text = "DONE"
         task.delay(1.2, function() if btn and btn.Parent then btn.Text = "RESET" end end)
@@ -3453,7 +3450,7 @@ do
     btn.TextColor3 = COLORS.White
     btn.Parent = row
     corner(btn, 8)
-    btn.MouseButton1Click:Connect(function()
+    btn.Activated:Connect(function()
         saveConfig()
         btn.Text = "SAVED!"
         task.delay(3, function() if btn and btn.Parent then btn.Text = "SAVE" end end)
@@ -3474,7 +3471,7 @@ do
     btn.TextColor3 = COLORS.White
     btn.Parent = row
     corner(btn, 8)
-    btn.MouseButton1Click:Connect(function()
+    btn.Activated:Connect(function()
 
         Config.NormalSpeed = 59.5
         Config.CarrySpeed = 29
@@ -5943,8 +5940,7 @@ end)
 _G.__VyzeActionKeyConnection = UserInputService.InputBegan:Connect(function(input, processed)
     if keybindCaptureActive then return end
     local isKeyboard = input.UserInputType == Enum.UserInputType.Keyboard
-    local isGamepad = input.UserInputType == Enum.UserInputType.Gamepad1
-    if not (isKeyboard or isGamepad) then return end
+    if not isKeyboard then return end
 
     local keyName = input.KeyCode.Name:upper()
     local dropKey = tostring(Config.DropKey or ""):upper()
@@ -5961,7 +5957,7 @@ _G.__VyzeActionKeyConnection = UserInputService.InputBegan:Connect(function(inpu
         return
     end
     if tpDownKey ~= "" and keyName == tpDownKey then
-        if (isGamepad or not processed) and safeModeAllowsAction("tpDown") then performTPDown() end
+        if not processed and safeModeAllowsAction("tpDown") then performTPDown() end
         return
     end
 end)
@@ -6107,7 +6103,7 @@ for i, name in ipairs(tabNames) do
         }):Play()
     end)
 
-    btn.MouseButton1Click:Connect(function()
+    btn.Activated:Connect(function()
         selectTab(name)
     end)
 end
@@ -6389,16 +6385,15 @@ function buildMobileButtons()
             btn.BackgroundColor3 = accent
             btn.TextColor3 = mobileContrastText(accent)
             btn.TextTransparency = 0
+            btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
             btn.TextStrokeTransparency = 1
             if topLine then
                 topLine.BackgroundColor3 = accent
                 topLine.Visible = true
             end
             if grad then
-                grad.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, soft),
-                    ColorSequenceKeypoint.new(1, accent),
-                })
+                -- A UIGradient on a TextButton also affects its text; keep labels readable.
+                grad.Enabled = false
             end
             if st then
                 st.Color = accent
@@ -6409,18 +6404,18 @@ function buildMobileButtons()
         else
             btn:SetAttribute("PeakHubActive", false)
             btn.BackgroundColor3 = OFF_BG
-            btn.TextColor3 = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.28)
+            -- OFF state: force pure white for clear contrast on the near-black button.
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
             btn.TextTransparency = 0
+            btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
             btn.TextStrokeTransparency = 1
             if topLine then
                 topLine.BackgroundColor3 = accent
                 topLine.Visible = false
             end
             if grad then
-                grad.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, Color3.fromRGB(35, 35, 40)),
-                    ColorSequenceKeypoint.new(1, OFF_BG),
-                })
+                -- Do not let the background gradient tint the button text.
+                grad.Enabled = false
             end
             if st then
                 st.Color = accent
@@ -6442,13 +6437,14 @@ function buildMobileButtons()
                 local grad = btn:FindFirstChildOfClass("UIGradient")
                 local topLine = btn:FindFirstChild("OrangeAccent")
                 btn.BackgroundColor3 = active and accent or OFF_BG
-                btn.TextColor3 = active and mobileContrastText(accent) or accent:Lerp(Color3.fromRGB(255, 255, 255), 0.28)
+                -- Never let theme accents darken OFF labels; keep them pure white.
+                btn.TextColor3 = active and mobileContrastText(accent) or Color3.fromRGB(255, 255, 255)
                 btn.TextTransparency = 0
+                btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
                 btn.TextStrokeTransparency = 1
                 if grad then
-                    grad.Color = active
-                        and ColorSequence.new({ColorSequenceKeypoint.new(0, soft), ColorSequenceKeypoint.new(1, accent)})
-                        or ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(35, 35, 40)), ColorSequenceKeypoint.new(1, OFF_BG)})
+                    -- TextButton gradients tint text as well as the background, so disable them.
+                    grad.Enabled = false
                 end
                 if st then
                     st.Color = accent
@@ -6517,7 +6513,7 @@ function buildMobileButtons()
         btn.Position = pos
         btn.BackgroundColor3 = OFF_BG
         -- Resolve the accent here; `accent` is local to the theme helper functions.
-        btn.TextColor3 = liveMobileAccent():Lerp(Color3.fromRGB(255, 255, 255), 0.28)
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
         btn.TextTransparency = 0
         btn.Font = Enum.Font.GothamBlack
         btn.TextSize = math.max(10, math.floor(12 * scale))
@@ -6540,6 +6536,8 @@ function buildMobileButtons()
             ColorSequenceKeypoint.new(1, OFF_BG),
         })
         gradient.Parent = btn
+        -- Keep the TextButton's label true white; UIGradient affects text as well as background.
+        gradient.Enabled = false
 
         local topAccent = Instance.new("Frame")
         topAccent.Name = "OrangeAccent"
@@ -6569,7 +6567,7 @@ function buildMobileButtons()
         end
         mobBtnRefs[def.key] = setVisual
 
-        btn.MouseButton1Click:Connect(function()
+        btn.Activated:Connect(function()
             if def.key == "drop" then
                 if not safeModeAllowsAction("drop") then setVisual(false); return end
                 setVisual(true)
@@ -7905,7 +7903,7 @@ function playVyzeIntro()
         }):Play()
         tn(skipStroke, 0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, {Transparency = 0.4}):Play()
     end)
-    skipBtn.MouseButton1Click:Connect(function()
+    skipBtn.Activated:Connect(function()
         if not introActive then return end
         introActive = false
         pcall(function() if introBlur then introBlur:Destroy() end end)

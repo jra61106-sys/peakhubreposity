@@ -57,6 +57,7 @@ local Config = {
     CarrySpeedKey = "C",
     LaggerSpeed = 40,
     LaggerCarry = 20,
+    LaggerSpeedKey = "X",
     LaggerCarryKey = "X",
     TPDownKey = "E",
     DropKey = "F",
@@ -1784,12 +1785,7 @@ end
 
 function getActiveSpeed()
     local char = LP.Character
-    local keyLaggerCarry = false
-    if type(Config.LaggerCarryKey) == "string" and Config.LaggerCarryKey ~= "" and Config.LaggerCarryKey ~= "None" then
-        local ok, keyCode = pcall(function() return Enum.KeyCode[Config.LaggerCarryKey] end)
-        if ok and keyCode then keyLaggerCarry = UserInputService:IsKeyDown(keyCode) end
-    end
-    local inLagger = laggerModeEnabled or laggerSpeedEnabled or laggerCarryEnabled or keyLaggerCarry
+    local inLagger = laggerModeEnabled or laggerSpeedEnabled or laggerCarryEnabled
 
 
     if carrySpeedEnabled then
@@ -1799,7 +1795,7 @@ function getActiveSpeed()
     if autoCarryBoost and Config.AutoCarrySpeed then
         return inLagger and (tonumber(Config.LaggerCarry) or 20) or (tonumber(Config.CarrySpeed) or 29)
     end
-    if laggerCarryEnabled or keyLaggerCarry then return tonumber(Config.LaggerCarry) or 20 end
+    if laggerCarryEnabled then return tonumber(Config.LaggerCarry) or 20 end
     if laggerModeEnabled or laggerSpeedEnabled then return tonumber(Config.LaggerSpeed) or 40 end
     return tonumber(Config.NormalSpeed) or 59.5
 end
@@ -2007,7 +2003,8 @@ numberBadge(normRow, Config.CarrySpeed, -56, 40, function(val)
 end)
 
 local laggerRow = rowBase(movement, "Lagger Speed", false)
-keybindBadge(laggerRow, Config.LaggerCarryKey or "None", -156, 48, function(key)
+keybindBadge(laggerRow, Config.LaggerSpeedKey or Config.LaggerCarryKey or "None", -156, 48, function(key)
+    Config.LaggerSpeedKey = key
     Config.LaggerCarryKey = key
 end)
 numberBadge(laggerRow, Config.LaggerSpeed, -102, 40, function(val)
@@ -3770,7 +3767,7 @@ startBatAimbot=function()
             end
         end
 
-        local frontOffset=2.5
+        local frontOffset=2.8
         local frontTargetPos=predictedPos+targetMoveForward*frontOffset
         local chasePos=frontTargetPos
         local actualDelta=actualTargetPos-root.Position
@@ -3807,7 +3804,7 @@ startBatAimbot=function()
             _speedLVClear(root)
         end
 
-        local desiredHeight=chasePos.Y+3.7
+        local desiredHeight=chasePos.Y+4.0
         local yVel=(desiredHeight-root.Position.Y)*19.5
         if hum.FloorMaterial~=Enum.Material.Air then yVel=math.max(yVel,13) end
         yVel=math.clamp(yVel,-70,110)
@@ -6043,14 +6040,16 @@ UserInputService.InputBegan:Connect(function(input, processed)
     if is(Config.DropKey) then
         if canStart("drop") and type(runDrop) == "function" then
             pcall(runDrop)
+            saveConfig()
         end
         return
     elseif is(Config.TPDownKey) then
         if processed then return end
-        if canStart("tpDown") then performTPDown() end
+        if canStart("tpDown") then performTPDown(); saveConfig() end
     elseif is(Config.InstaResetKey) then
         if canStart("reset") and type(cursedInstaReset) == "function" then
             pcall(cursedInstaReset)
+            saveConfig()
         end
         return
     elseif processed then
@@ -6081,13 +6080,21 @@ UserInputService.InputBegan:Connect(function(input, processed)
                 if mobBtnRefs.laggerCarry then pcall(mobBtnRefs.laggerCarry, false) end
             end
         end
+        saveConfig()
 
-    elseif is(Config.LaggerCarryKey) then
-        laggerCarryEnabled = not laggerCarryEnabled
-        if laggerCarryEnabled then
-            laggerSpeedEnabled = false
+    elseif is(Config.LaggerSpeedKey or Config.LaggerCarryKey) then
+        laggerSpeedEnabled = not laggerSpeedEnabled
+        if laggerSpeedEnabled then
+            laggerModeEnabled = false
+            laggerCarryEnabled = false
             carrySpeedEnabled = false
+            if mobBtnRefs then
+                if mobBtnRefs.carrySpeed then pcall(mobBtnRefs.carrySpeed, false) end
+                if mobBtnRefs.lagger then pcall(mobBtnRefs.lagger, false) end
+                if mobBtnRefs.laggerCarry then pcall(mobBtnRefs.laggerCarry, false) end
+            end
         end
+        saveConfig()
 
     elseif is(Config.AutoLeftKey) then
         if canStart() then
@@ -6134,15 +6141,15 @@ _G.__VyzeActionKeyConnection = UserInputService.InputBegan:Connect(function(inpu
 
 
     if dropKey ~= "" and keyName == dropKey then
-        if safeModeAllowsAction("drop") then pcall(runDrop) end
+        if safeModeAllowsAction("drop") then pcall(runDrop); saveConfig() end
         return
     end
     if resetKey ~= "" and keyName == resetKey then
-        if safeModeAllowsAction("reset") then pcall(cursedInstaReset) end
+        if safeModeAllowsAction("reset") then pcall(cursedInstaReset); saveConfig() end
         return
     end
     if tpDownKey ~= "" and keyName == tpDownKey then
-        if not processed and safeModeAllowsAction("tpDown") then performTPDown() end
+        if not processed and safeModeAllowsAction("tpDown") then performTPDown(); saveConfig() end
         return
     end
 end)
@@ -6853,6 +6860,7 @@ function buildMobileButtons()
                     carrySpeedEnabled = false
                 end
                 setVisual(carrySpeedEnabled == true)
+                saveConfig()
             elseif def.key == "lagger" then
                 if not safeModeAllowsAction("lagger") then setVisual(false); return end
                 laggerModeEnabled = not laggerModeEnabled
@@ -6863,6 +6871,7 @@ function buildMobileButtons()
                     if mobBtnRefs.laggerCarry then mobBtnRefs.laggerCarry(false) end
                 end
                 setVisual(laggerModeEnabled)
+                saveConfig()
             elseif def.key == "laggerCarry" then
                 if not safeModeAllowsAction("laggerCarry") then setVisual(false); return end
                 laggerCarryEnabled = not laggerCarryEnabled
@@ -6873,6 +6882,7 @@ function buildMobileButtons()
                     if mobBtnRefs.lagger then mobBtnRefs.lagger(false) end
                 end
                 setVisual(laggerCarryEnabled)
+                saveConfig()
             end
         end)
     end

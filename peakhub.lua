@@ -100,6 +100,8 @@ local Config = {
     Unwalk = false,
     AnimPack = "Bubbly",
     BatSkin = "Katana",
+    Headless = false,
+    Korblox = false,
     AntiLag = false,
     StretchRes = false,
     FOVChange = false,
@@ -2984,6 +2986,164 @@ numberBadge(fovRow, Config.FOVValue, -60, 44, function(val)
         pcall(function() workspace.CurrentCamera.FieldOfView = Config.FOVValue end)
     end
 end)
+
+
+do
+sectionLabel(visual, "HEADLESS & KORBLOX")
+
+-- Visual-only appearance toggles adapted from the supplied reference.
+-- Original character parts are preserved and restored when toggled off.
+local peakAppearanceState = {
+    headless = setmetatable({}, {__mode = "k"}),
+    korblox = setmetatable({}, {__mode = "k"}),
+}
+
+local function setPeakHeadless(active, character)
+    character = character or LP.Character
+    local head = character and character:FindFirstChild("Head")
+    if not head or not head:IsA("BasePart") then return false end
+    if active then
+        if not peakAppearanceState.headless[character] then
+            local saved = {
+                transparency = head.Transparency,
+                localTransparency = head.LocalTransparencyModifier,
+                faces = {},
+            }
+            for _, item in ipairs(head:GetChildren()) do
+                if item:IsA("Decal") or item:IsA("Texture") then
+                    table.insert(saved.faces, {item = item, transparency = item.Transparency})
+                end
+            end
+            peakAppearanceState.headless[character] = saved
+        end
+        head.Transparency = 1
+        head.LocalTransparencyModifier = 1
+        for _, item in ipairs(head:GetChildren()) do
+            if item:IsA("Decal") or item:IsA("Texture") then item.Transparency = 1 end
+        end
+        return true
+    end
+    local saved = peakAppearanceState.headless[character]
+    if not saved then return false end
+    if head.Parent then
+        head.Transparency = saved.transparency
+        head.LocalTransparencyModifier = saved.localTransparency
+    end
+    for _, face in ipairs(saved.faces) do
+        if face.item and face.item.Parent then face.item.Transparency = face.transparency end
+    end
+    peakAppearanceState.headless[character] = nil
+    return true
+end
+
+local function setPeakKorblox(active, character)
+    character = character or LP.Character
+    if not character then return false end
+    local saved = peakAppearanceState.korblox[character]
+    local function removeVisual()
+        local old = character:FindFirstChild("PeakVisual_Korblox")
+        if old then pcall(function() old:Destroy() end) end
+        for _, child in ipairs(character:GetChildren()) do
+            if child:IsA("CharacterMesh") and child.Name == "PeakVisual_KorbloxCharacterMesh" then
+                pcall(function() child:Destroy() end)
+            end
+        end
+    end
+    if not active then
+        removeVisual()
+        if not saved then return true end
+        for _, partState in ipairs(saved.parts) do
+            if partState.part and partState.part.Parent then
+                partState.part.Transparency = partState.transparency
+                partState.part.LocalTransparencyModifier = partState.localTransparency
+            end
+        end
+        peakAppearanceState.korblox[character] = nil
+        return true
+    end
+
+    local target = character:FindFirstChild("LeftUpperLeg") or character:FindFirstChild("Left Leg")
+    if not target or not target:IsA("BasePart") then return false end
+    local ok, objects = pcall(function() return game:GetObjects("rbxassetid://139607673") end)
+    if not ok or type(objects) ~= "table" or not objects[1] then
+        warn("Peak Hub Korblox: unable to load visual asset 139607673")
+        return false
+    end
+    removeVisual()
+    local visual = Instance.new("Model")
+    visual.Name = "PeakVisual_Korblox"
+    for _, object in ipairs(objects) do object.Parent = visual end
+    local importedParts, characterMeshes = {}, {}
+    for _, descendant in ipairs(visual:GetDescendants()) do
+        if descendant:IsA("BasePart") then table.insert(importedParts, descendant) end
+        if descendant:IsA("CharacterMesh") then table.insert(characterMeshes, descendant) end
+    end
+    if #importedParts == 0 and #characterMeshes == 0 then
+        visual:Destroy()
+        warn("Peak Hub Korblox: asset has no compatible visual parts")
+        return false
+    end
+    if not saved then
+        saved = {parts = {}}
+        for _, partName in ipairs({"LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "Left Leg"}) do
+            local part = character:FindFirstChild(partName)
+            if part and part:IsA("BasePart") then
+                table.insert(saved.parts, {part = part, transparency = part.Transparency, localTransparency = part.LocalTransparencyModifier})
+            end
+        end
+        peakAppearanceState.korblox[character] = saved
+    end
+    visual.Parent = character
+    local isR15 = character:FindFirstChild("LeftUpperLeg") ~= nil
+    if isR15 then
+        for _, partState in ipairs(saved.parts) do
+            if partState.part and partState.part.Parent then
+                partState.part.Transparency = 1
+                partState.part.LocalTransparencyModifier = 1
+            end
+        end
+    end
+    for _, part in ipairs(importedParts) do
+        local matchingTarget = character:FindFirstChild(part.Name)
+        if not matchingTarget or not matchingTarget:IsA("BasePart") then matchingTarget = target end
+        part.Anchored = false
+        part.CanCollide = false
+        part.Massless = true
+        part.CFrame = matchingTarget.CFrame
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = matchingTarget
+        weld.Part1 = part
+        weld.Parent = part
+    end
+    for _, mesh in ipairs(characterMeshes) do
+        mesh.Name = "PeakVisual_KorbloxCharacterMesh"
+        mesh.Parent = character
+    end
+    return true
+end
+
+toggleRow(visual, "Headless", Config.Headless, function(state)
+    Config.Headless = state
+    setPeakHeadless(state, LP.Character)
+    saveConfig()
+end)
+toggleRow(visual, "Korblox", Config.Korblox, function(state)
+    Config.Korblox = state
+    task.spawn(function() setPeakKorblox(state, LP.Character) end)
+    saveConfig()
+end)
+
+LP.CharacterAdded:Connect(function(character)
+    task.wait(0.75)
+    if Config.Headless then pcall(setPeakHeadless, true, character) end
+    if Config.Korblox then task.spawn(function() pcall(setPeakKorblox, true, character) end) end
+end)
+task.defer(function()
+    task.wait(1)
+    if Config.Headless then pcall(setPeakHeadless, true, LP.Character) end
+    if Config.Korblox then task.spawn(function() pcall(setPeakKorblox, true, LP.Character) end) end
+end)
+end -- scoped Headless & Korblox locals
 
 local settings = makePage("Settings")
 

@@ -6083,16 +6083,25 @@ UserInputService.InputBegan:Connect(function(input, processed)
         saveConfig()
 
     elseif is(Config.LaggerSpeedKey or Config.LaggerCarryKey) then
-        laggerSpeedEnabled = not laggerSpeedEnabled
-        if laggerSpeedEnabled then
+        -- Un solo keybind cicla: Lagger normale -> Lagger Carry -> spenti.
+        -- La variabile laggerSpeedEnabled resta disattivata per evitare conflitti
+        -- con le due modalità selezionate dal keybind.
+        if laggerModeEnabled then
             laggerModeEnabled = false
+            laggerCarryEnabled = true
+        elseif laggerCarryEnabled then
             laggerCarryEnabled = false
-            carrySpeedEnabled = false
-            if mobBtnRefs then
-                if mobBtnRefs.carrySpeed then pcall(mobBtnRefs.carrySpeed, false) end
-                if mobBtnRefs.lagger then pcall(mobBtnRefs.lagger, false) end
-                if mobBtnRefs.laggerCarry then pcall(mobBtnRefs.laggerCarry, false) end
-            end
+            laggerModeEnabled = false
+        else
+            laggerModeEnabled = true
+            laggerCarryEnabled = false
+        end
+        laggerSpeedEnabled = false
+        carrySpeedEnabled = false
+        if mobBtnRefs then
+            if mobBtnRefs.carrySpeed then pcall(mobBtnRefs.carrySpeed, false) end
+            if mobBtnRefs.lagger then pcall(mobBtnRefs.lagger, laggerModeEnabled) end
+            if mobBtnRefs.laggerCarry then pcall(mobBtnRefs.laggerCarry, laggerCarryEnabled) end
         end
         saveConfig()
 

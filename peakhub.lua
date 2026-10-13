@@ -74,6 +74,7 @@ local Config = {
     InfiniteJump = false,
     InfJumpMode = "Hold",
     AntiRagdoll = false,
+    AntiRagdollMode = "V1",
     BatCounter = false,
     MedusaCounter = false,
     AntiDie = false,
@@ -198,7 +199,6 @@ local function peakHubIsAccentTone(color)
         return true
     end
     local r, g, b = color.R * 255, color.G * 255, color.B * 255
-    -- Catch legacy orange/dark-orange accent constants so they follow every theme.
     return r >= 95 and r > g * 1.22 and g >= b * 1.18 and b <= 115 and g <= 190
 end
 
@@ -246,7 +246,6 @@ main.Active = true
 main.Draggable = not Config.LockUI
 main.Parent = screenGui
 
--- Manual dragging is disabled whenever Lock UI is enabled.
 do
     local uiDragging = false
     local dragInput = nil
@@ -381,8 +380,6 @@ local function applyUIBackground(url)
         return
     end
 
-    -- Use the on-disk asset immediately when available. Otherwise show the URL right away
-    -- while the local copy downloads, instead of waiting for the HTTP request to finish.
     local cached = cachedBackgroundAsset(url)
     if cached then
         setImage(cached)
@@ -405,7 +402,6 @@ local function applyUIBackground(url)
             local file = backgroundCacheFile(url)
             pcall(function() writefile(file, data) end)
             local asset = cachedBackgroundAsset(url)
-            -- Do not let a slow download for an older selection replace the current image.
             if asset and Config.UIBackgroundUrl == url then
                 setImage(asset)
             end
@@ -424,21 +420,16 @@ local function refreshDeviceLayout()
     local viewport = cam and cam.ViewportSize or Vector2.new(1280, 720)
     local shortSide = math.min(viewport.X, viewport.Y)
     if UserInputService.TouchEnabled and shortSide < 500 then
-        -- Small phones: compact enough to keep the full panel usable.
         deviceScaleFactor = 0.76
     elseif UserInputService.TouchEnabled and shortSide >= 600 then
-        -- iPad/tablet: only a subtle reduction.
         deviceScaleFactor = 0.95
     elseif UserInputService.TouchEnabled then
-        -- Larger phones / small mobile screens.
         deviceScaleFactor = 0.84
     else
-        -- Desktop: barely smaller than the original size.
         deviceScaleFactor = 0.96
     end
     local base = math.clamp((tonumber(Config.UIScale) or 50) / 50, 0.2, 2)
     uiScaleObj.Scale = base * deviceScaleFactor
-    -- Keep the panel around the middle, biased to the left side.
     if not _G.PeakHubMainWasDragged then
         main.AnchorPoint = Vector2.new(0.5, 0.5)
         main.Position = UDim2.new(0.143, 0, 0.436, 0)
@@ -668,7 +659,6 @@ function syncMiniState()
     end
 end
 
--- Restore the intro progress-line track; this was referenced below without being created.
 local lineTrack = Instance.new("Frame")
 lineTrack.Name = "IntroLineTrack"
 lineTrack.Size = UDim2.new(0, 180, 0, 2)
@@ -1103,8 +1093,6 @@ function toggleRow(parent, labelText, defaultOn, onToggle, initialKey, onKeyChan
         end
     end
 
-    -- Debounce Activated: gamepad focus/selection can occasionally fire twice,
-    -- making the toggle appear ON and immediately flip back OFF.
     local lastToggleActivation = 0
     track.Activated:Connect(function()
         local now = os.clock()
@@ -1360,7 +1348,6 @@ function modeButtonsRow(parent, options, currentOption, onSelected)
     local strokes = {}
 
     local function refreshAll()
-        -- Always read the live palette at refresh time; never retain the original orange accent.
         local liveAccent = peakHubAccentColor()
         local liveSoft = peakHubSoftColor()
         for opt, btn in pairs(buttons) do
@@ -1889,8 +1876,6 @@ function doAutoTPDown(force)
 
     local landingY = getTPDownLandingY(char, hrp, hum)
     local _, yaw = hrp.CFrame:ToEulerAnglesYXZ()
-    -- VX7-style TP Down lands at the detected floor instead of a fixed Y=-7.
-    -- Preserve horizontal speed so this doesn't switch the active speed controller.
     local currentVelocity = hrp.AssemblyLinearVelocity
     hrp.CFrame = CFrame.new(hrp.Position.X, landingY, hrp.Position.Z) * CFrame.Angles(0, yaw, 0)
     hrp.AssemblyLinearVelocity = Vector3.new(currentVelocity.X, 0, currentVelocity.Z)
@@ -2093,8 +2078,6 @@ local mirrorTPPreviousY = {}
 local mirrorTPDownEnabled = Config.MirrorTPDown == true
 local mirrorTPDownSetVisual = nil
 
--- Equipaggia la mazza una sola volta quando si attiva Bat Aimbot/Auto Swing.
--- Non forza continuamente l'equipaggiamento: il giocatore può usare altri tool.
 local function peakEquipBatOnce()
     local character = LP.Character
     local backpack = LP:FindFirstChildOfClass("Backpack")
@@ -2136,7 +2119,6 @@ end, function(key)
     Config.BatAimbotKey = key
 end)
 
--- Bat Aimbot uses the same neutral row outline as the other rows (never orange).
 if typeof(batAimbotRow) == "Instance" then
     local batStroke = batAimbotRow:FindFirstChild("RowStroke")
     if batStroke then
@@ -2314,14 +2296,62 @@ toggleRow(misc, "Infinite Jump", Config.InfiniteJump, function(state)
     Config.InfiniteJump = state == true
     saveConfig()
 end)
-toggleRow(misc, "Anti Ragdoll", Config.AntiRagdoll, function(state)
+local antiRagdollRow, setAntiRagdollVisual = toggleRow(misc, "Anti Ragdoll", Config.AntiRagdoll, function(state)
     Config.AntiRagdoll = state
     if state then
-        if _G._VyzeStartAntiRagdoll then _G._VyzeStartAntiRagdoll() end
+        if Config.AntiRagdollMode == "V2" then
+            if _G._PeakStartAntiRagdollV2 then _G._PeakStartAntiRagdollV2() end
+        elseif _G._VyzeStartAntiRagdoll then
+            _G._VyzeStartAntiRagdoll()
+        end
     else
         if _G._VyzeStopAntiRagdoll then _G._VyzeStopAntiRagdoll() end
+        if _G._PeakStopAntiRagdollV2 then _G._PeakStopAntiRagdollV2() end
     end
 end)
+
+-- Selettore V1/V2 compatto accanto al toggle Anti Ragdoll.
+local antiRagModeButtons = {}
+local function setAntiRagdollMode(mode)
+    mode = mode == "V2" and "V2" or "V1"
+    Config.AntiRagdollMode = mode
+    for name, button in pairs(antiRagModeButtons) do
+        local selected = name == mode
+        button.BackgroundColor3 = selected and (COLORS.Accent or Color3.fromRGB(255,120,0)) or Color3.fromRGB(0,0,0)
+        button.TextColor3 = Color3.fromRGB(255,255,255)
+        local outline = button:FindFirstChildOfClass("UIStroke")
+        if outline then outline.Thickness = selected and 2 or 1; outline.Transparency = selected and 0 or 0.3 end
+    end
+    if Config.AntiRagdoll then
+        if _G._VyzeStopAntiRagdoll then _G._VyzeStopAntiRagdoll() end
+        if _G._PeakStopAntiRagdollV2 then _G._PeakStopAntiRagdollV2() end
+        if mode == "V2" then
+            if _G._PeakStartAntiRagdollV2 then _G._PeakStartAntiRagdollV2() end
+        elseif _G._VyzeStartAntiRagdoll then
+            _G._VyzeStartAntiRagdoll()
+        end
+    end
+    saveConfig()
+end
+for index, mode in ipairs({"V1", "V2"}) do
+    local button = Instance.new("TextButton")
+    button.Name = "AntiRagdoll" .. mode
+    button.Size = UDim2.new(0, 30, 0, 24)
+    button.Position = UDim2.new(1, index == 1 and -132 or -98, 0.5, -12)
+    button.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    button.BorderSizePixel = 0
+    button.AutoButtonColor = false
+    button.Text = mode
+    button.TextColor3 = Color3.fromRGB(255,255,255)
+    button.TextSize = 11
+    button.Font = Enum.Font.GothamBold
+    button.Parent = antiRagdollRow
+    corner(button, 6)
+    stroke(button, 1.2, _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255,120,0), 0.2)
+    button.Activated:Connect(function() setAntiRagdollMode(mode) end)
+    antiRagModeButtons[mode] = button
+end
+setAntiRagdollMode(Config.AntiRagdollMode or "V1")
 
 sectionLabel(misc, "COUNTERS")
 toggleRow(misc, "Bat Counter", Config.BatCounter, function(state)
@@ -2360,14 +2390,12 @@ end)
 
 local spinRow
 spinRow, setSpinGuiVisual = toggleRow(misc, "Spin", Config.Spin, function(state)
-    -- Bat Aimbot has priority; Spin can only resume if it was already on before Bat Aimbot.
     if state and (Config.BatAimbot or State.autoBatToggled) then
         Config.Spin = false
         if stopSpin then pcall(stopSpin) end
         if setSpinGuiVisual then pcall(setSpinGuiVisual, false) end
     else
         if Config.AutoBrainrot then
-            -- Auto Brainrot owns Spin while enabled: no equipped item means Spin stays OFF.
             Config.Spin = state == true and characterHasBrainrotEquipped()
         else
             Config.Spin = state == true
@@ -2379,13 +2407,11 @@ spinRow, setSpinGuiVisual = toggleRow(misc, "Spin", Config.Spin, function(state)
         end
         if setSpinGuiVisual then pcall(setSpinGuiVisual, Config.Spin) end
     end
-    -- Spin always requests Anti Die, regardless of the Anti Die UI toggle.
     if syncAutoAntiDie then pcall(syncAutoAntiDie) end
     saveConfig()
 end)
 
 
--- Auto Brainrot sub-row directly beneath Spin; it enables Spin only while an item is equipped.
 local autoBrainrotRow, setAutoBrainrotVisual
 local autoBrainrotExpanded = false
 local autoBrainrotExpandButton = Instance.new("TextButton")
@@ -2417,8 +2443,6 @@ autoBrainrotExpandButton.Activated:Connect(function()
     end
 end)
 
--- Auto Brainrot: the option is enabled by the user, but its active state follows
--- whether a brainrot/carry item is actually equipped in the character.
 local autoBrainrotSwingVisual
 local autoBrainrotActive = false
 local autoBrainrotConn
@@ -2426,20 +2450,17 @@ local function characterHasBrainrotEquipped()
     local character = LP.Character
     if not character then return false end
 
-    -- Only detect a carried/stolen brainrot, never a normal weapon Tool.
     local okSteal, stealing = pcall(function()
         return LP:GetAttribute("Stealing") == true
             or character:GetAttribute("Stealing") == true
     end)
     if okSteal and stealing then return true end
 
-    -- Reuse the carry detector, which checks carry flags and brainrot/animal models.
     if _GACC and type(_GACC.autoCarryDetect) == "function" then
         local ok, carrying = pcall(_GACC.autoCarryDetect)
         if ok and carrying == true then return true end
     end
 
-    -- Fallback: a brainrot/animal model attached directly to the character.
     for _, item in ipairs(character:GetChildren()) do
         if item:IsA("Model") then
             local name = item.Name:lower()
@@ -2454,15 +2475,16 @@ local function characterHasBrainrotEquipped()
 end
 
 local function updateAutoBrainrot()
-    -- Desired behavior: with Auto Brainrot enabled, Spin is OFF with empty hands
-    -- and turns ON as soon as an item/tool is equipped; it turns OFF again on unequip.
-    local shouldBeActive = Config.AutoBrainrot == true and characterHasBrainrotEquipped()
+    if Config.AutoBrainrot ~= true then
+        autoBrainrotActive = false
+        return
+    end
+
+    local shouldBeActive = characterHasBrainrotEquipped()
     local stateChanged = shouldBeActive ~= autoBrainrotActive
     local spinOutOfSync = (Config.Spin == true) ~= shouldBeActive
     autoBrainrotActive = shouldBeActive
 
-    -- Re-assert the desired state every heartbeat so another Spin handler cannot
-    -- leave Spin ON while no item is held (or OFF while one is held).
     if stateChanged or spinOutOfSync then
         Config.Spin = shouldBeActive
         if shouldBeActive then
@@ -2479,9 +2501,7 @@ autoBrainrotRow, setAutoBrainrotVisual = toggleRow(misc, "    Auto Brainrot", Co
     Config.AutoBrainrot = state == true
     if not state then
         autoBrainrotActive = false
-        Config.Spin = false
-        if stopSpin then pcall(stopSpin) end
-        if setSpinGuiVisual then pcall(setSpinGuiVisual, false) end
+        if setSpinGuiVisual then pcall(setSpinGuiVisual, Config.Spin == true) end
         if syncAutoAntiDie then pcall(syncAutoAntiDie) end
     else
         updateAutoBrainrot()
@@ -2491,8 +2511,6 @@ end)
 autoBrainrotRow.Visible = false
 autoBrainrotRow.LayoutOrder = spinRow.LayoutOrder + 1
 autoBrainrotSwingVisual = function(state)
-    -- Reflect Auto Swing's state without triggering the toggle callback.
-    -- The row's own visual is managed by its normal user toggle.
 end
 if autoBrainrotConn then autoBrainrotConn:Disconnect() end
 autoBrainrotConn = RunService.Heartbeat:Connect(updateAutoBrainrot)
@@ -2518,7 +2536,6 @@ applyBatSpinRule = function(enabled)
     saveConfig()
 end
 
--- Initial sync: if Bat Aimbot starts from a saved config, keep both interfaces consistent.
 if Config.BatAimbot or State.autoBatToggled then
     if mobBtnRefs and mobBtnRefs.autoBat then pcall(mobBtnRefs.autoBat, true) end
     if _G.PeakHubSetBatAimbotUI then pcall(_G.PeakHubSetBatAimbotUI, true) end
@@ -2544,13 +2561,11 @@ keybindBadge(instaResetActionRow, Config.InstaResetKey, -60, 48, function(key)
 end)
 
 
--- ============ PEAK HUB BAT SKIN ============
 local PEAK_BAT_SKIN_ASSETS = {
     Scythe = "8699386664",
     ["Ban Hammer"] = "14701192921",
     ["Minecraft Sword"] = "minecraft_mesh",
 }
--- Per-skin grip alignment, based on the actual asset proportions.
 local PEAK_BAT_SKIN_ADJUST = {
     Scythe = {x = 0.09, y = -1, z = -0.8, rx = 0, ry = -90, rz = 0, size = 6},
     ["Ban Hammer"] = {x = 0, y = -1, z = 0, rx = 0, ry = 180, rz = 0, size = 4},
@@ -2586,28 +2601,6 @@ local function peakRestoreBatTool(tool)
                 obj:SetAttribute("PeakHubOldLTM", nil)
                 obj:SetAttribute("PeakHubOldTransparency", nil)
             end)
-        elseif obj:IsA("Sound") and obj.Name ~= "PeakBatSwingSound" then
-            pcall(function()
-                local oldVolume = obj:GetAttribute("PeakHubOldSoundVolume")
-                local oldSoundId = obj:GetAttribute("PeakHubOldSoundId")
-                if oldVolume ~= nil then obj.Volume = oldVolume end
-                if oldSoundId ~= nil then obj.SoundId = oldSoundId end
-                obj:SetAttribute("PeakHubOldSoundVolume", nil)
-                obj:SetAttribute("PeakHubOldSoundId", nil)
-            end)
-        end
-    end
-end
-
-local function peakMuteOriginalBatSounds(tool)
-    for _, obj in ipairs(tool:GetDescendants()) do
-        if obj:IsA("Sound") and obj.Name ~= "PeakBatSwingSound" then
-            if obj:GetAttribute("PeakHubOldSoundVolume") == nil then
-                obj:SetAttribute("PeakHubOldSoundVolume", obj.Volume)
-                obj:SetAttribute("PeakHubOldSoundId", obj.SoundId)
-            end
-            obj.Volume = 0
-            pcall(function() obj:Stop() end)
         end
     end
 end
@@ -2668,7 +2661,6 @@ local function peakSetupBatSkinEffects(tool, skin, folder)
         PEAK_BAT_SKIN_CONNECTIONS[tool] = nil
     end
 
-    -- Place the swing trail on the longest visible skin part, not on the hidden handle.
     local bestPart, bestAxis, bestLength = nil, "Y", 0
     for _, obj in ipairs(folder:GetDescendants()) do
         if obj:IsA("BasePart") then
@@ -2702,45 +2694,8 @@ local function peakSetupBatSkinEffects(tool, skin, folder)
         trail.Parent = folder
     end
 
-    local swingSound = handle:FindFirstChild("PeakBatSwingSound")
-    if not swingSound then
-        swingSound = Instance.new("Sound")
-        swingSound.Name = "PeakBatSwingSound"
-        swingSound.Volume = 0.18
-        swingSound.PlaybackSpeed = 1
-        swingSound.Parent = handle
-    end
-    swingSound.Volume = 0.18 -- Swing più basso per lasciare in evidenza il suono dell'hit.
-    swingSound.SoundId = PEAK_BAT_SKIN_SOUNDS[skin] or "rbxassetid://111808555599832"
-
-    -- L'attivazione del tool arma una finestra breve; il suono parte solo
-    -- quando Roblox segnala l'avvio di un'animazione reale del personaggio.
-    local pendingSwingUntil = 0
-    local lastSkinSwingSound = 0
-    local char = tool.Parent
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local animator = hum and hum:FindFirstChildOfClass("Animator")
-    if animator then
-        PEAK_BAT_SKIN_ANIM_CONNECTIONS[tool] = animator.AnimationPlayed:Connect(function(track)
-            if not tool.Parent or tool.Parent ~= char or Config.BatSkin ~= skin then return end
-            local now = os.clock()
-            if now > pendingSwingUntil or now - lastSkinSwingSound < 0.22 then return end
-            local animationId = ""
-            pcall(function() animationId = track.Animation and track.Animation.AnimationId or "" end)
-            if animationId == "" then return end
-            lastSkinSwingSound = now
-            pendingSwingUntil = 0
-            pcall(function()
-                swingSound:Stop()
-                swingSound.TimePosition = 0
-                swingSound:Play()
-            end)
-        end)
-    end
-
     PEAK_BAT_SKIN_CONNECTIONS[tool] = tool.Activated:Connect(function()
         if not tool.Parent or Config.BatSkin ~= skin then return end
-        pendingSwingUntil = os.clock() + 0.45
         local trail = folder:FindFirstChild("PeakBatSwingTrail", true)
         if trail and trail:IsA("Trail") then
             trail.Enabled = true
@@ -2760,7 +2715,6 @@ local function peakApplyBatSkin(tool)
     end
     peakRestoreBatTool(tool)
     if skin == "None" then return end
-    peakMuteOriginalBatSounds(tool)
     local handle = peakGetHandle(tool)
     if not handle then return end
 
@@ -2822,7 +2776,6 @@ local function peakApplyBatSkin(tool)
         local pommel = peakMakeSkinPart(folder, "PeakKatanaPommel",
             Vector3.new(0.27, 0.13, 0.27), Color3.fromRGB(255, 120, 0), Enum.Material.Metal)
         peakWeldSkin(handle, pommel, CFrame.new(0, -1.59, 0))
-        -- Effects are connected below, after the skin has been built.
         task.defer(function()
             if tool and tool.Parent and folder and folder.Parent then
                 peakSetupBatSkinEffects(tool, skin, folder)
@@ -2878,7 +2831,6 @@ local function peakApplyBatSkin(tool)
         end
     end
 
-    -- Rotate long models so the weapon's long axis follows the handle direction.
     local orient = CFrame.new()
     local _, scaledSize = model:GetBoundingBox()
     if scaledSize.X > scaledSize.Y and scaledSize.X > scaledSize.Z then
@@ -2891,8 +2843,6 @@ local function peakApplyBatSkin(tool)
         * orient
         * CFrame.Angles(math.rad(adjust.rx or 0), math.rad(adjust.ry or 0), math.rad(adjust.rz or 0))
 
-    -- Align the model's bounding-box center to the grip target, rather than
-    -- assuming the imported asset's pivot is at its handle.
     local currentPivot = model:GetPivot()
     local currentBox = select(1, model:GetBoundingBox())
     local boxFromPivot = currentPivot:ToObjectSpace(currentBox)
@@ -3042,7 +2992,6 @@ local settings = makePage("Settings")
 
 
 
--- Lock UI freezes the main interface and its manual/native dragging.
 main.Active = true
 main.Draggable = not Config.LockUI
 if Config.HideUI then
@@ -3056,7 +3005,6 @@ end
 
 sectionLabel(settings, "UI")
 
--- Background selector: 12 slots. Background 1 is the default image; backgrounds 2-12 use supplied URLs.
 do
     local BACKGROUND_URLS = {
         [1] = "https://files.catbox.moe/sz7icy.png",
@@ -3073,8 +3021,6 @@ do
         [12] = "https://files.catbox.moe/b2xyii.png",
     }
 
-    -- Warm the local cache in the background so later selections can switch nearly instantly.
-    -- This never blocks UI creation and leaves the currently selected background untouched.
     task.spawn(function()
         for i = 1, 12 do
             local url = BACKGROUND_URLS[i]
@@ -3099,8 +3045,6 @@ do
         end
     end)
 
-    -- Each background has its own accent palette, applied across the main UI,
-    -- side buttons, toggles, rows, strokes, and overhead UI elements.
     local BACKGROUND_THEMES = {
         [1]  = {accent = Color3.fromRGB(255, 120, 0), soft = Color3.fromRGB(100, 35, 0)},
         [2]  = {accent = Color3.fromRGB(255, 75, 75), soft = Color3.fromRGB(105, 25, 25)},
@@ -3118,16 +3062,12 @@ do
 
     local function isWarmAccent(c)
         local r, g, b = math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5)
-        -- Include bright amber/yellow-orange shades too; older Auto Steal controls used these.
         return r >= 95 and r > g * 1.08 and g >= b * 1.08 and b <= 175 and g <= 235
     end
     local function isColoredAccent(c)
         local r, g, b = c.R, c.G, c.B
         local hi = math.max(r, g, b)
         local lo = math.min(r, g, b)
-        -- Treat saturated or clearly tinted colors as theme accents, but preserve black and white.
-        -- Include fully bright saturated accents too (e.g. cyan/blue with a channel at 255).
-        -- Exclude only near-neutral whites/greys so theme changes do not recolor text or neutral UI.
         return hi > 0.16 and (hi - lo) > 0.10 and not (lo > 0.88 and (hi - lo) < 0.12)
     end
     local function applyBackgroundTheme(index)
@@ -3151,8 +3091,6 @@ do
         COLORS.AccentSoft = theme.soft
         COLORS.Purple = theme.soft
 
-        -- Recolor existing GUI objects using their current accent colors.
-        -- White labels and black backgrounds are deliberately preserved.
         local guiRoots = {screenGui}
         local mobileGui = playerGui:FindFirstChild("VyzeMobileButtons")
         if mobileGui then table.insert(guiRoots, mobileGui) end
@@ -3179,8 +3117,6 @@ do
                                 elseif c == oldSoft then
                                     c = theme.soft
                                 elseif isColoredAccent(c) then
-                                    -- Map legacy tinted gradient stops to accent/soft by brightness,
-                                    -- so gradients remain dimensional and coordinated with the image.
                                     local brightness = (c.R * 0.299) + (c.G * 0.587) + (c.B * 0.114)
                                     c = brightness > 0.58 and theme.accent or theme.soft
                                 end
@@ -3224,9 +3160,6 @@ do
                 end
             end
         end
-        -- Toggle tracks, active pills, and row outlines follow the selected theme.
-        -- RowStroke is forced explicitly because legacy orange strokes may not match
-        -- the previous palette exactly and otherwise can remain orange after a swap.
         for _, obj in ipairs(screenGui:GetDescendants()) do
             if obj:IsA("UIStroke") and obj.Parent then
                 local parentName = obj.Parent.Name
@@ -3244,8 +3177,6 @@ do
                 end
             end
         end
-        -- Force the row outline color for the specific rows called out by the user
-        -- (Drop and Bat Aimbot included), without changing their keybind/toggle controls.
         for _, obj in ipairs(screenGui:GetDescendants()) do
             if obj:IsA("Frame") then
                 local rowStroke = obj:FindFirstChild("RowStroke")
@@ -3268,8 +3199,6 @@ do
                 end
             end
         end
-        -- Mobile side buttons are refreshed explicitly from the selected GUI palette.
-        -- This avoids old hard-coded orange/blue values overriding the current theme.
         if mobileGui then
             for _, btn in ipairs(mobileGui:GetChildren()) do
                 if btn:IsA("TextButton") then
@@ -3312,7 +3241,6 @@ do
         end
         if StealSys and StealSys.applyTheme then pcall(StealSys.applyTheme) end
 
-        -- Keep the row label white while the full row outline follows the active UI theme.
         local function recolorNamedRow(targetText)
             local target = string.lower((targetText or ""):gsub("%s+", " "))
             for _, label in ipairs(screenGui:GetDescendants()) do
@@ -3338,32 +3266,26 @@ do
         recolorNamedRow("Drop")
         recolorNamedRow("Bat Aimbot")
 
-        -- Repaint all progress-bar header/status text every time the background changes.
         if StealSys then
             for _, label in ipairs({StealSys.titleLabel, StealSys.modeLabel, StealSys.radiusLabel, StealSys.progressLabel, StealSys.discordLabel}) do
                 if label and label:IsA("TextLabel") then label.TextColor3 = theme.accent end
             end
         end
-        -- Also update labels by their actual instance names; this covers header labels
-        -- whose reference fields differ between older and newer progress-bar builds.
         for _, label in ipairs(screenGui:GetDescendants()) do
             if label:IsA("TextLabel") and ({ModeLabel=true, DiscordHeaderLabel=true, RadiusLabel=true, Status=true})[label.Name] then
                 label.TextColor3 = theme.accent
             end
         end
 
-        -- Repaint action rows immediately while preserving their enabled state.
         if dropActionRow then pcall(setRowGlow, dropActionRow, dropActionRow:GetAttribute("GlowOn") == true) end
         if autoLeftRow then pcall(setRowGlow, autoLeftRow, autoLeftRow:GetAttribute("GlowOn") == true) end
         if autoRightRow then pcall(setRowGlow, autoRightRow, autoRightRow:GetAttribute("GlowOn") == true) end
-        -- Refresh Normal/Semi, V1/V2 and other segmented mode rows on the first click/theme change.
         if type(_G.__PeakHubModeButtonRefreshers) == "table" then
             for _, refreshModeRow in ipairs(_G.__PeakHubModeButtonRefreshers) do
                 if type(refreshModeRow) == "function" then pcall(refreshModeRow) end
             end
         end
 
-        -- If tabs already exist, refresh the selected tab's accent now, not on the next click.
         if type(selectTab) == "function" then
             task.defer(function()
                 pcall(function() selectTab(_G.PeakHubSelectedTab or "Movement") end)
@@ -3371,8 +3293,6 @@ do
         end
     end
 
-    -- Apply the saved background palette immediately on startup as well as on arrow clicks.
-    -- Without this initial pass, Auto Steal controls can keep their default orange until the user changes background.
     pcall(function() applyBackgroundTheme(Config.UIBackgroundIndex) end)
 
     local row = rowBase(settings, "Background", false)
@@ -3416,7 +3336,6 @@ do
             main.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
         end
         saveConfig()
-        -- Reapply once the image/background update and any UI property callbacks have settled.
         task.defer(function()
             pcall(function() applyBackgroundTheme(Config.UIBackgroundIndex) end)
         end)
@@ -3519,11 +3438,9 @@ toggleRow(settings, "Lock UI", Config.LockUI, function(state)
     Config.LockUI = state
     main.Active = true
     main.Draggable = not state
-    -- Lock UI freezes every draggable UI surface, including the Auto Steal bar.
     _G.PeakHubUILocked = state
     if state then
         _G.PeakHubMainWasDragged = _G.PeakHubMainWasDragged or false
-        -- Drag handlers read this flag on every input update, so all side buttons freeze immediately.
     end
 end)
 
@@ -3711,7 +3628,6 @@ local Conns = { aimbot = nil }
 
 
 
--- EnvyHub-style adaptive prediction, while retaining Peak Hub's bypass movement.
 local BAT_PREDICTION_MIN = 0.05
 local BAT_PREDICTION_MAX = 0.12
 local BAT_PREDICTION_CACHE = {}
@@ -3812,7 +3728,6 @@ end
 
 startBatAimbot=function()
     if safeModeTryStart and not safeModeTryStart() then return end
-    -- Equipaggiamento iniziale singolo; mai forzato di nuovo durante il loop.
     pcall(peakEquipBatOnce)
     if Conns.aimbot then Conns.aimbot:Disconnect(); Conns.aimbot=nil end
     mirrorTPActive=true
@@ -3831,9 +3746,6 @@ startBatAimbot=function()
         if not root or not hum or hum.Health<=0 then return end
 
         hum.AutoRotate=false
-        -- Non forzare l'equipaggiamento ogni frame: il player può usare
-        -- un altro Tool. La mazza viene equipaggiata solo all'attivazione;
-        -- Auto Swing riparte quando la mazza è equipaggiata manualmente.
         local target=getClosestTarget()
         if not target then
             _aimbotTarget=nil
@@ -3842,14 +3754,9 @@ startBatAimbot=function()
         end
         _aimbotTarget=target
 
-        -- Prediction adattiva per inseguire la traiettoria del target.
-        -- La logica di movimento/bypass Peak resta invariata: si aggiornano solo
-        -- il punto d'inseguimento e la direzione dello sguardo.
         local actualTargetPos=target.Position
         local predictedPos=getEnvyPredictedPosition(target)
 
-        -- Stima la direzione in cui il target si sta muovendo; se è quasi fermo,
-        -- usa la direzione del suo personaggio come fallback stabile.
         local targetVelocity=target.AssemblyLinearVelocity
         local targetMoveForward=Vector3.new(targetVelocity.X,0,targetVelocity.Z)
         if targetMoveForward.Magnitude>1.5 then
@@ -3874,8 +3781,6 @@ startBatAimbot=function()
         local moveFlat=Vector3.new(moveDelta.X,0,moveDelta.Z)
         local actualDistance=actualDelta.Magnitude
 
-        -- Vicino al target riduce l'offset, ma continua a usare la prediction
-        -- per anticiparne il movimento ed evitare cambi bruschi avanti/indietro.
         if actualFlat.Magnitude < 9 then
             local nearOffset=math.clamp(actualFlat.Magnitude/9,0.35,1) * frontOffset
             chasePos=predictedPos+targetMoveForward*nearOffset
@@ -3883,7 +3788,6 @@ startBatAimbot=function()
             moveFlat=Vector3.new(moveDelta.X,0,moveDelta.Z)
         end
 
-        -- Guarda verso il punto previsto, cioè dove il target sta andando.
         local lookDelta=Vector3.new(chasePos.X-root.Position.X,0,chasePos.Z-root.Position.Z)
         if lookDelta.Magnitude < 0.05 then
             lookDelta=predictedFlat
@@ -3903,7 +3807,6 @@ startBatAimbot=function()
             _speedLVClear(root)
         end
 
-        -- Vertical tracking remains separate from horizontal movement.
         local desiredHeight=chasePos.Y+3.7
         local yVel=(desiredHeight-root.Position.Y)*19.5
         if hum.FloorMaterial~=Enum.Material.Air then yVel=math.max(yVel,13) end
@@ -3911,7 +3814,6 @@ startBatAimbot=function()
         local currentY=root.AssemblyLinearVelocity.Y
         root.AssemblyLinearVelocity=Vector3.new(root.AssemblyLinearVelocity.X,currentY+(yVel-currentY)*0.8,root.AssemblyLinearVelocity.Z)
 
-        -- Auto Swing only when Bat Aimbot is enabled and an actual bat/slap tool is equipped.
         local equippedTool=char:FindFirstChildOfClass("Tool")
         local isBatEquipped=equippedTool and (equippedTool.Name:lower():find("bat",1,true) or equippedTool.Name:lower():find("slap",1,true))
         if Config.AutoSwing and Config.BatAimbot and State.autoBatToggled and isBatEquipped and actualDistance<=8 then
@@ -4079,7 +3981,6 @@ stopAntiDie = function()
 end
 
 
--- Spin has one fixed setting: Very Fast (0.90), with no speed selector.
 local spinConn = nil
 local spinOldAutoRotate = nil
 local spinHumanoid = nil
@@ -4087,7 +3988,8 @@ startSpin = function()
     if spinConn then spinConn:Disconnect(); spinConn = nil end
     spinHumanoid = nil
     spinOldAutoRotate = nil
-    spinConn = RunService.Heartbeat:Connect(function()
+    -- RenderStepped applies the spin after most character/Shift Lock rotation updates.
+    spinConn = RunService.RenderStepped:Connect(function(dt)
         if not Config.Spin then return end
         local char = LP.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -4098,12 +4000,15 @@ startSpin = function()
             end
             spinHumanoid = hum
             spinOldAutoRotate = hum.AutoRotate
-            -- Prevent Shift Lock's character-facing controller from fighting the spin.
-            pcall(function() hum.AutoRotate = false end)
         end
-        if root then
+        if hum and root and hum.Health > 0 then
+            -- Keep Shift Lock from taking ownership of facing while Spin is enabled.
+            pcall(function() hum.AutoRotate = false end)
             pcall(function()
+                -- Restore Peak Hub's original Very Fast spin: 0.90 radians per frame.
+                -- Do not scale by dt; that was making the spin much slower than before.
                 root.CFrame = root.CFrame * CFrame.Angles(0, 0.90, 0)
+                root.AssemblyAngularVelocity = Vector3.zero
             end)
         end
     end)
@@ -4131,7 +4036,6 @@ syncAutoAntiDie = function()
     end
 end
 
--- Restore Spin state from config and keep Anti Die synchronized with it.
 if Config.Spin == true then
     if startSpin then pcall(startSpin) end
 end
@@ -4190,8 +4094,6 @@ local function isInfiniteJumpGamepad(input)
 end
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if UserInputService:GetFocusedTextBox() then return end
-    -- Roblox may mark the gamepad's default jump input as processed.
-    -- Still track ButtonA for Infinite Jump while preserving the processed-input guard for other controls.
     if input.KeyCode == Enum.KeyCode.ButtonA and isInfiniteJumpGamepad(input) then
         infiniteJumpGamepadHeld = true
         return
@@ -4322,43 +4224,74 @@ local function forceAntiRagdollRecovery()
     end)
 end
 
-local function startAntiRagdollLH()
-    if AntiRagdollV1.Enabled then return end
-    AntiRagdollV1.Enabled = true
-    cacheAntiRagdollCharacter()
+-- Anti Ragdoll V1: versione leggera della reference, con un solo controllo Heartbeat.
+local antiRagdollV1ReferenceConnection = nil
+local antiRagdollV1CharacterConnection = nil
 
-    AntiRagdollV1.CameraConnection = RunService.RenderStepped:Connect(function()
-        if not AntiRagdollV1.Enabled then return end
-        local cached = AntiRagdollV1.CachedCharacter
+local function resetAntiRagdollV1Character(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not hum or not root or hum.Health <= 0 then return end
+    pcall(function()
+        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+        root.Velocity = Vector3.zero
+        root.RotVelocity = Vector3.zero
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+        hum.PlatformStand = false
+        hum.Sit = false
+        hum.AutoRotate = true
+        hum.JumpPower = hum.JumpPower > 0 and hum.JumpPower or 50
+        hum.WalkSpeed = hum.WalkSpeed > 0 and hum.WalkSpeed or 16
+        for _, obj in ipairs(char:GetDescendants()) do
+            if obj:IsA("Motor6D") then
+                obj.Enabled = true
+            elseif obj:IsA("Constraint") then
+                obj.Enabled = true
+            elseif obj:IsA("BasePart") then
+                obj.CanCollide = true
+                obj.AssemblyLinearVelocity = Vector3.zero
+                obj.AssemblyAngularVelocity = Vector3.zero
+            end
+        end
         local cam = workspace.CurrentCamera
-        if cam and cached and cached.humanoid and cached.humanoid.Parent then
-            cam.CameraSubject = cached.humanoid
+        if cam then cam.CameraSubject = hum end
+        local playerScripts = LP:FindFirstChild("PlayerScripts")
+        local playerModule = playerScripts and playerScripts:FindFirstChild("PlayerModule")
+        local controlModule = playerModule and playerModule:FindFirstChild("ControlModule")
+        if controlModule then
+            local ok, mod = pcall(require, controlModule)
+            if ok and mod and mod.Enable then mod:Enable() end
         end
     end)
+end
 
-    AntiRagdollV1.CharacterConnection = LP.CharacterAdded:Connect(function()
-        task.wait(0.25)
-        cacheAntiRagdollCharacter()
+local function startAntiRagdollLH()
+    if antiRagdollV1ReferenceConnection then return end
+    AntiRagdollV1.Enabled = true
+    cacheAntiRagdollCharacter()
+    antiRagdollV1ReferenceConnection = RunService.Heartbeat:Connect(function()
+        if not Config.AntiRagdoll or Config.AntiRagdollMode ~= "V1" then return end
+        local char = LP.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+        local state = hum:GetState()
+        if state == Enum.HumanoidStateType.Physics
+            or state == Enum.HumanoidStateType.Ragdoll
+            or state == Enum.HumanoidStateType.FallingDown
+            or state == Enum.HumanoidStateType.Dead
+            or hum.PlatformStand == true
+            or hum.Sit == true then
+            resetAntiRagdollV1Character(char)
+        end
     end)
-
-    task.spawn(function()
-        while AntiRagdollV1.Enabled do
-            task.wait(0.05)
-            if not AntiRagdollV1.CachedCharacter
-                or not AntiRagdollV1.CachedCharacter.humanoid
-                or not AntiRagdollV1.CachedCharacter.humanoid.Parent
-                or not AntiRagdollV1.CachedCharacter.root
-                or not AntiRagdollV1.CachedCharacter.root.Parent then
-                cacheAntiRagdollCharacter()
-            end
-
-            if isAntiRagdollCharacterDown() then
-                forceAntiRagdollRecovery()
-            elseif AntiRagdollV1.IsBoosting then
-                if os.clock() - AntiRagdollV1.LastBoostTime > 0.35 then
-                    AntiRagdollV1.IsBoosting = false
-                end
-            end
+    antiRagdollV1CharacterConnection = LP.CharacterAdded:Connect(function(char)
+        task.wait(0.25)
+        if Config.AntiRagdoll and Config.AntiRagdollMode == "V1" then
+            resetAntiRagdollV1Character(char)
+            cacheAntiRagdollCharacter()
         end
     end)
 end
@@ -4366,6 +4299,14 @@ end
 local function stopAntiRagdollLH()
     AntiRagdollV1.Enabled = false
     AntiRagdollV1.IsBoosting = false
+    if antiRagdollV1ReferenceConnection then
+        antiRagdollV1ReferenceConnection:Disconnect()
+        antiRagdollV1ReferenceConnection = nil
+    end
+    if antiRagdollV1CharacterConnection then
+        antiRagdollV1CharacterConnection:Disconnect()
+        antiRagdollV1CharacterConnection = nil
+    end
     if AntiRagdollV1.CameraConnection then
         AntiRagdollV1.CameraConnection:Disconnect()
         AntiRagdollV1.CameraConnection = nil
@@ -4381,9 +4322,66 @@ local function stopAntiRagdollLH()
     AntiRagdollV1.CachedCharacter = nil
 end
 
+-- Anti Ragdoll V2: usa la seconda logica della reference (RagdollEndTime,
+-- rimozione dei constraint e ripristino dello stato/camera).
+local AntiRagdollV2 = { Connection = nil, Character = nil, Humanoid = nil, Root = nil, CharacterConnection = nil }
+local function cacheAntiRagdollV2Character()
+    local char = LP.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not hum or not root then return false end
+    AntiRagdollV2.Character, AntiRagdollV2.Humanoid, AntiRagdollV2.Root = char, hum, root
+    local cam = workspace.CurrentCamera
+    if cam then cam.CameraSubject = hum end
+    return true
+end
+local function stopAntiRagdollV2()
+    if AntiRagdollV2.Connection then AntiRagdollV2.Connection:Disconnect(); AntiRagdollV2.Connection = nil end
+    if AntiRagdollV2.CharacterConnection then AntiRagdollV2.CharacterConnection:Disconnect(); AntiRagdollV2.CharacterConnection = nil end
+    AntiRagdollV2.Character, AntiRagdollV2.Humanoid, AntiRagdollV2.Root = nil, nil, nil
+end
+local function startAntiRagdollV2()
+    if AntiRagdollV2.Connection then return end
+    if not cacheAntiRagdollV2Character() then return end
+    AntiRagdollV2.CharacterConnection = LP.CharacterAdded:Connect(function()
+        task.wait(0.25)
+        if Config.AntiRagdoll and Config.AntiRagdollMode == "V2" then cacheAntiRagdollV2Character() end
+    end)
+    AntiRagdollV2.Connection = RunService.RenderStepped:Connect(function()
+        local char, hum, root = AntiRagdollV2.Character, AntiRagdollV2.Humanoid, AntiRagdollV2.Root
+        if not char or not char.Parent or not hum or not hum.Parent or not root or not root.Parent then
+            cacheAntiRagdollV2Character()
+            return
+        end
+        local state = hum:GetState()
+        local ragdollEnd = LP:GetAttribute("RagdollEndTime")
+        local timerActive = ragdollEnd and (ragdollEnd - workspace:GetServerTimeNow()) > 0
+        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown or timerActive then
+            pcall(function() LP:SetAttribute("RagdollEndTime", workspace:GetServerTimeNow()) end)
+            for _, obj in ipairs(char:GetDescendants()) do
+                if obj:IsA("BallSocketConstraint") or (obj:IsA("Attachment") and string.find(obj.Name, "RagdollAttachment", 1, true)) then
+                    pcall(function() obj:Destroy() end)
+                end
+            end
+            pcall(function()
+                root.Anchored = false
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+                if hum.Health > 0 then hum:ChangeState(Enum.HumanoidStateType.Running) end
+                local cam = workspace.CurrentCamera
+                if cam and cam.CameraSubject ~= hum then cam.CameraSubject = hum end
+            end)
+        end
+    end)
+end
+_G._PeakStartAntiRagdollV2 = startAntiRagdollV2
+_G._PeakStopAntiRagdollV2 = stopAntiRagdollV2
 _G._VyzeStartAntiRagdoll = startAntiRagdollLH
 _G._VyzeStopAntiRagdoll = stopAntiRagdollLH
-if Config.AntiRagdoll then startAntiRagdollLH() end
+if Config.AntiRagdoll then
+    if Config.AntiRagdollMode == "V2" then startAntiRagdollV2() else startAntiRagdollLH() end
+end
 
 
 local BAT_COUNTER_SLAP_LIST = {
@@ -4484,7 +4482,6 @@ startBatCounter = function()
             batCounterWasRagdoll = false
             return
         end
-        -- Match VX7: don't counter while Bat TP / smart Bat TP is controlling movement.
         if Config.BatTP or Config._smartBatTpDriving or Config._instaResetInProgress then
             batCounterWasRagdoll = false
             return
@@ -4514,7 +4511,6 @@ startBatCounter = function()
                 local currentHum = currentChar and currentChar:FindFirstChildOfClass("Humanoid")
                 if not currentChar or not root or not currentHum then return end
 
-                -- VX7-style target selection: nearest living opponent is required.
                 local targetRoot, bestDistance = nil, math.huge
                 for _, player in ipairs(Players:GetPlayers()) do
                     if player ~= LP and player.Character then
@@ -4542,7 +4538,6 @@ startBatCounter = function()
                 currentHum = currentChar and currentChar:FindFirstChildOfClass("Humanoid")
                 if not root or not currentHum or not targetRoot.Parent then return end
 
-                -- Briefly face the target, then swing once using the equipped bat.
                 local targetPos = targetRoot.Position
                 local flatTarget = Vector3.new(targetPos.X, root.Position.Y, targetPos.Z)
                 if (flatTarget - root.Position).Magnitude > 0.001 then
@@ -4921,12 +4916,10 @@ do
     card.BackgroundTransparency = 0.28
     card.BorderSizePixel = 0
     card.ClipsDescendants = false
-    -- Keep the panel click-through; only visible controls above it can receive input.
     card.Active = false
     card.Selectable = false
     card.Parent = spGui
     corner(card, 8)
-    -- Transparent layout: no enclosing card or decorative border.
     local progressCardStroke = nil
 
     local accentRail = Instance.new("Frame")
@@ -4948,7 +4941,6 @@ do
     headerRule.ZIndex = 3
     headerRule.Parent = card
 
-    -- Dedicated header handle: lets the bar move when unlocked without making the whole panel block clicks.
     local dragHandle = Instance.new("TextButton")
     dragHandle.Name = "DragHandle"
     dragHandle.Size = UDim2.new(1, 0, 0, 27)
@@ -4962,7 +4954,6 @@ do
     dragHandle.Parent = card
 
     StealSys.progressGui = spGui
-    -- Keep every accent in the Steal progress bar synchronized with the selected UI background.
     local function applyStealBarTheme()
         local accent = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
         local cardStroke = card:FindFirstChildOfClass("UIStroke")
@@ -4975,13 +4966,11 @@ do
         if StealSys.progressFill then StealSys.progressFill.BackgroundColor3 = accent end
         local track = card:FindFirstChild("ProgressTrack")
         if track then
-            -- Keep the track readable, but make its subtle tint follow the selected background theme.
             track.BackgroundColor3 = soft
             track.BackgroundTransparency = 0.18
             local ts = track:FindFirstChildOfClass("UIStroke")
             if ts then ts.Color = accent end
         end
-        -- Every progress-bar text element follows the selected background theme.
         if StealSys.titleLabel then StealSys.titleLabel.TextColor3 = accent end
         if StealSys.progressLabel then StealSys.progressLabel.TextColor3 = accent end
         if StealSys.modeLabel then StealSys.modeLabel.TextColor3 = accent end
@@ -5527,7 +5516,6 @@ function executeStealV2(prompt, animalData)
             local char = LP.Character
             local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso"))
             if not hrp then return false end
-            -- Measure distance from the actual brainrot/podium, not the prompt attachment.
             if animalData and animalData.plot and animalData.slot then
                 local plots = workspace:FindFirstChild("Plots")
                 local plot = plots and plots:FindFirstChild(animalData.plot)
@@ -5697,7 +5685,7 @@ startAutoStealSystem = function()
                 for _, ad in ipairs(StealSys.animalCache) do
                     if ad.worldPosition then
                         local d = (hrp.Position - ad.worldPosition).Magnitude
-                        if d <= math.max(radius, 70) and d < bestD then
+                        if d <= radius and d < bestD then
                             bestD = d
                             target = ad
                         end
@@ -5739,7 +5727,6 @@ stopAutoStealSystem = function()
     resetStealProgress()
 end
 
--- VX7-style Ragdoll Steal: pause Auto Steal when a hit, ragdoll, or knockdown is detected.
 Config._AutoStealHitPauseUntil = Config._AutoStealHitPauseUntil or 0
 Config._AutoStealHitToken = Config._AutoStealHitToken or 0
 Config._AutoStealLastRagdoll = false
@@ -6305,8 +6292,6 @@ for i, name in ipairs(tabNames) do
         selectTab(name)
     end)
 end
--- Apply the selected background palette to the initially selected tab immediately.
--- Defer one extra refresh so the first rendered frame cannot keep stale tab colors.
 selectTab(currentTab)
 task.defer(function()
     task.wait()
@@ -6407,8 +6392,6 @@ function cursedInstaReset()
         end)
     end)
 
-    -- Instant Reset V2: fisica / stato Physics, con tentativi ripetuti
-    -- un frame alla volta finché il personaggio muore o scade la finestra.
     task.spawn(function()
         local savedPlatformStand = humanoid.PlatformStand
         local savedBreakJoints = humanoid.BreakJointsOnDeath
@@ -6422,8 +6405,6 @@ function cursedInstaReset()
             root.AssemblyLinearVelocity = Vector3.new(0, 1e6, 0)
         end
 
-        -- Burst limitato e poi un tentativo per frame: evita un ciclo
-        -- enorme nello stesso frame e lascia avanzare la fisica.
         for _ = 1, 8 do
             local ch = LP.Character
             if ch ~= character or not character.Parent or humanoid.Health <= 0 then
@@ -6446,7 +6427,6 @@ function cursedInstaReset()
             if root and hum then pcall(applyV2, hum, root) end
         end
 
-        -- Se V2 non ha causato il reset, ripristina lo stato originale.
         if LP.Character == character and character.Parent and humanoid.Health > 0 then
             pcall(function()
                 humanoid.PlatformStand = savedPlatformStand
@@ -6506,7 +6486,6 @@ function buildMobileButtons()
 
     local OFF_BG = Color3.fromRGB(18, 18, 20)
     local BLACK = Color3.fromRGB(0, 0, 0)
-    -- OFF labels follow the outline accent; ON labels use a contrasting color.
     local function mobileContrastText(color)
         local function linearChannel(v)
             if v <= 0.04045 then return v / 12.92 end
@@ -6598,7 +6577,6 @@ function buildMobileButtons()
                 innerStroke.Transparency = 0
             end
             if grad then
-                -- A UIGradient on a TextButton also affects its text; keep labels readable.
                 grad.Enabled = false
             end
             if st then
@@ -6610,7 +6588,6 @@ function buildMobileButtons()
         else
             btn:SetAttribute("PeakHubActive", false)
             btn.BackgroundColor3 = OFF_BG
-            -- OFF state: force pure white for clear contrast on the near-black button.
             btn.TextColor3 = Color3.fromRGB(255, 255, 255)
             btn.TextTransparency = 0
             btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -6625,7 +6602,6 @@ function buildMobileButtons()
                 innerStroke.Transparency = 0.55
             end
             if grad then
-                -- Do not let the background gradient tint the button text.
                 grad.Enabled = false
             end
             if st then
@@ -6637,7 +6613,6 @@ function buildMobileButtons()
         end
     end
 
-    -- One source of truth: every side button follows the active GUI accent.
     _G.PeakHubRefreshMobileButtonTheme = function()
         local accent = liveMobileAccent()
         local soft = liveMobileSoft()
@@ -6645,20 +6620,17 @@ function buildMobileButtons()
         for _, btn in ipairs(gui:GetChildren()) do
             if btn:IsA("TextButton") then
                 local active = btn:GetAttribute("PeakHubActive") == true
-                -- Every OFF mobile button uses the same near-black background.
                 local offColor = OFF_BG
                 local st = btn:FindFirstChildOfClass("UIStroke")
                 local grad = btn:FindFirstChildOfClass("UIGradient")
                 local topLine = btn:FindFirstChild("OrangeAccent")
                 local innerStroke = btn:FindFirstChild("PeakHubInnerAccent")
                 btn.BackgroundColor3 = active and accent or offColor
-                -- Never let theme accents darken OFF labels; keep them pure white.
                 btn.TextColor3 = Color3.fromRGB(255, 255, 255)
                 btn.TextTransparency = 0
                 btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
                 btn.TextStrokeTransparency = 1
                 if grad then
-                    -- TextButton gradients tint text as well as the background, so disable them.
                     grad.Enabled = false
                 end
                 if st then
@@ -6695,7 +6667,6 @@ function buildMobileButtons()
             end
         end)
         UserInputService.InputChanged:Connect(function(input)
-            -- Lock UI must freeze every side button immediately, including an in-progress drag.
             if Config.LockUI or _G.PeakHubUILocked then
                 dragging = false
                 return
@@ -6728,7 +6699,6 @@ function buildMobileButtons()
         local pos = defaultPos(def)
         btn.Position = pos
         btn.BackgroundColor3 = OFF_BG
-        -- Resolve the accent here; `accent` is local to the theme helper functions.
         btn.TextColor3 = Color3.fromRGB(255, 255, 255)
         btn.TextTransparency = 0
         btn.Font = Enum.Font.GothamBlack
@@ -6752,7 +6722,6 @@ function buildMobileButtons()
             ColorSequenceKeypoint.new(1, OFF_BG),
         })
         gradient.Parent = btn
-        -- Keep the TextButton's label true white; UIGradient affects text as well as background.
         gradient.Enabled = false
 
         local topAccent = Instance.new("Frame")
@@ -6766,7 +6735,6 @@ function buildMobileButtons()
         topAccent.Visible = false
         corner(topAccent, math.max(2, math.floor(2 * scale)))
 
-        -- Decorative glossy highlight kept separate from the label so it never darkens text.
         local shine = Instance.new("Frame")
         shine.Name = "PeakHubGloss"
         shine.Size = UDim2.new(0.72, 0, 0, math.max(2, math.floor(2 * scale)))
@@ -6778,11 +6746,8 @@ function buildMobileButtons()
         shine.Parent = btn
         corner(shine, math.max(2, math.floor(2 * scale)))
 
-        -- Thin vivid orange inset border for a more detailed, layered button look.
         local innerStroke = Instance.new("UIStroke")
         innerStroke.Name = "PeakHubInnerAccent"
-        -- Compute this highlight in the button-creation scope; the helper-local
-        -- themeHighlight variable is not visible here.
         innerStroke.Color = liveMobileAccent():Lerp(Color3.fromRGB(255, 255, 255), 0.24)
         innerStroke.Thickness = 1
         innerStroke.Transparency = 0.12
@@ -6917,7 +6882,6 @@ function buildMobileButtons()
     if Config.AutoRight and mobBtnRefs.autoRight then mobBtnRefs.autoRight(true) end
     if Config.BatAimbot and mobBtnRefs.autoBat then mobBtnRefs.autoBat(true) end
 
-    -- Reapply the selected theme after the buttons have all been created.
     pcall(_G.PeakHubRefreshMobileButtonTheme)
 
     _G.__VyzeRefreshSafeModeMobileVisuals = function()
@@ -7184,7 +7148,6 @@ local ragdollCountdownEndTime = 0
 local RAGDOLL_COUNTDOWN_SECONDS = 2.6
 local ragdollCountdownGui, ragdollCountdownLabel = nil, nil
 
--- Keep ESP, tracers, and the ragdoll countdown in sync with the selected UI accent.
 _G.PeakHubRefreshVisualAccents = function()
     local accent = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
     TRACER_COLOR = accent
@@ -7704,7 +7667,6 @@ LP.CharacterAdded:Connect(function(char)
 end)
 
 
--- Anti Lag: processing in batches to avoid a single long frame; original settings are cached and restored.
 local antiLagState = { conn = nil, active = false, cache = {}, lighting = nil, effects = {} }
 
 local function peakCacheProperty(instance, property)
@@ -7877,8 +7839,13 @@ function ensureOverheadLabels(char)
     if not anchor then return end
 
     if overheadGui and overheadGui.Parent then
+        -- Dopo il reset il BillboardGui può restare parentato al vecchio character.
+        -- Riaggancialo al nuovo anchor invece di lasciare le scritte sul modello eliminato.
         if overheadGui.Adornee ~= anchor then
             overheadGui.Adornee = anchor
+        end
+        if overheadGui.Parent ~= anchor then
+            overheadGui.Parent = anchor
         end
         return
     end
@@ -7894,7 +7861,6 @@ function ensureOverheadLabels(char)
     bb.AlwaysOnTop = true
     bb.MaxDistance = 200
     bb.Adornee = anchor
-    -- Parent directly to the character anchor so the overhead labels render reliably.
     bb.Parent = anchor
     overheadGui = bb
 
@@ -7999,11 +7965,38 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
+local overheadRespawnToken = 0
 LP.CharacterAdded:Connect(function(char)
-    task.wait(0.3)
-    ensureOverheadLabels(char)
+    overheadRespawnToken += 1
+    local thisToken = overheadRespawnToken
+    task.spawn(function()
+        -- Il personaggio può arrivare prima delle parti; riprova finché l'anchor è disponibile.
+        local deadline = os.clock() + 8
+        repeat
+            if thisToken ~= overheadRespawnToken or LP.Character ~= char then return end
+            ensureOverheadLabels(char)
+            if overheadGui and overheadGui.Parent and overheadGui.Adornee
+                and overheadGui.Adornee:IsDescendantOf(char) then
+                return
+            end
+            task.wait(0.15)
+        until os.clock() >= deadline
+    end)
 end)
-if LP.Character then ensureOverheadLabels(LP.Character) end
+if LP.Character then
+    task.defer(function()
+        local char = LP.Character
+        for _ = 1, 20 do
+            if LP.Character ~= char then return end
+            ensureOverheadLabels(char)
+            if overheadGui and overheadGui.Parent and overheadGui.Adornee
+                and overheadGui.Adornee:IsDescendantOf(char) then
+                return
+            end
+            task.wait(0.15)
+        end
+    end)
+end
 
 
 
@@ -8245,7 +8238,6 @@ function playVyzeIntro()
         ColorSequenceKeypoint.new(1, introAccent:Lerp(Color3.fromRGB(255, 255, 255), 0.28)),
     })
 
-    -- Small divider and creator credit directly below the PEAK HUB title.
     local introDivider = Instance.new("Frame", gui)
     introDivider.Name = "PeakHubIntroDivider"
     introDivider.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -8417,7 +8409,6 @@ if Config.BatAimbot and not Config.SafeMode then
 end
 
 
--- Keep interactive controls tappable on touch devices; decorative layers never intercept input.
 local function peakMakeGuiClickable(obj)
     if not obj or not obj:IsA("GuiObject") then return end
     if obj:IsA("GuiButton") then

@@ -92,6 +92,7 @@ Config = {
     UIBackgroundIndex = 1,
     CircleButtons = false,
     IntroEnabled = true,
+    IntroMusicUrl = "https://files.catbox.moe/sdfi1j.mp3",
     UIBackgroundUrl = "https://files.catbox.moe/sz7icy.png",
     PlayerESP = false,
     PlayerTracers = false,
@@ -139,6 +140,7 @@ function saveConfig()
 end
 
 function loadConfig()
+if Config.AutoPlayMode == "Semi" then Config.AutoPlayMode = "1 Btn" end
 
 
 Config.UIBackgroundUrl = "https://files.catbox.moe/sz7icy.png"
@@ -799,7 +801,6 @@ function sectionLabel(parent, text)
     return lbl
 end
 
--- Contorni riga: sempre accento tema live (mai arancione hardcoded).
 function peakHubUsesGuiThemeOutline(rowOrText)
     return false
 end
@@ -2072,7 +2073,6 @@ end)
 sectionLabel(movement, "AUTO PATHS")
 
 do
--- globali: applyBackgroundTheme deve poterle riallineare al colore tema
 autoLeftRow, autoRightRow, autoPlayRow = nil, nil, nil
 function renderAutoDirectionRows()
     if autoLeftRow then autoLeftRow:Destroy(); autoLeftRow = nil end
@@ -4038,77 +4038,76 @@ startBatAimbot=function()
         if not root or not hum or hum.Health<=0 then return end
 
         hum.AutoRotate=false
+
+        local bat=char:FindFirstChildOfClass("Tool")
+        local function isBatTool(tool)
+            if not tool or not tool:IsA("Tool") then return false end
+            local n=tool.Name:lower()
+            return n:find("bat",1,true)~=nil or n:find("slap",1,true)~=nil
+        end
+        if not isBatTool(bat) then
+            pcall(peakEquipBatOnce)
+            bat=char:FindFirstChildOfClass("Tool")
+        end
+
         local target=getClosestTarget()
         if not target then
             _aimbotTarget=nil
             root.AssemblyAngularVelocity=Vector3.zero
+            if _speedLVClear then pcall(_speedLVClear, root) end
             return
         end
         _aimbotTarget=target
 
-        local actualTargetPos=target.Position
-        local predictedPos=getEnvyPredictedPosition(target)
+        local myPos=root.Position
+        local targetPos=target.Position
+        local targetVel=target.AssemblyLinearVelocity
 
-        local targetVelocity=target.AssemblyLinearVelocity
-        local targetMoveForward=Vector3.new(targetVelocity.X,0,targetVelocity.Z)
-        if targetMoveForward.Magnitude>1.5 then
-            targetMoveForward=targetMoveForward.Unit
+        local predictBoost=targetVel*0.11+target.CFrame.LookVector*0.25
+        local aimPos=targetPos+predictBoost
+
+        local direction=aimPos-myPos
+        local flatDir=Vector3.new(direction.X,0,direction.Z)
+        if flatDir.Magnitude>0.05 then
+            flatDir=flatDir.Unit
         else
-            targetMoveForward=Vector3.new(target.CFrame.LookVector.X,0,target.CFrame.LookVector.Z)
-            if targetMoveForward.Magnitude>0.001 then
-                targetMoveForward=targetMoveForward.Unit
-            else
-                targetMoveForward=Vector3.zero
-            end
+            flatDir=Vector3.zero
         end
 
-        local frontOffset=2.8
-        local frontTargetPos=predictedPos+targetMoveForward*frontOffset
-        local chasePos=frontTargetPos
-        local actualDelta=actualTargetPos-root.Position
-        local actualFlat=Vector3.new(actualDelta.X,0,actualDelta.Z)
-        local predictedDelta=predictedPos-root.Position
-        local predictedFlat=Vector3.new(predictedDelta.X,0,predictedDelta.Z)
-        local moveDelta=chasePos-root.Position
-        local moveFlat=Vector3.new(moveDelta.X,0,moveDelta.Z)
-        local actualDistance=actualDelta.Magnitude
+        local chaseSpeed=getAimbotChaseSpeed()*1.08
 
-        if actualFlat.Magnitude < 9 then
-            local nearOffset=math.clamp(actualFlat.Magnitude/9,0.35,1) * frontOffset
-            chasePos=predictedPos+targetMoveForward*nearOffset
-            moveDelta=chasePos-root.Position
-            moveFlat=Vector3.new(moveDelta.X,0,moveDelta.Z)
-        end
-
-        local lookDelta=Vector3.new(chasePos.X-root.Position.X,0,chasePos.Z-root.Position.Z)
-        if lookDelta.Magnitude < 0.05 then
-            lookDelta=predictedFlat
-        end
-        if lookDelta.Magnitude > 0.05 then
-            local desiredCF=CFrame.lookAt(root.Position, root.Position+lookDelta.Unit)
-            local alpha=1-math.exp(-math.clamp(dt,0,0.1)*12)
-            root.CFrame=root.CFrame:Lerp(desiredCF,alpha)
-        end
-        root.AssemblyAngularVelocity=Vector3.zero
-
-        local chaseSpeed=getAimbotChaseSpeed()
-        if moveFlat.Magnitude > 0.05 then
-            local moveUnit=moveFlat.Unit
-            _speedLVSet(root,moveUnit.X*chaseSpeed,moveUnit.Z*chaseSpeed)
+        if flatDir.Magnitude>0.05 then
+            _speedLVSet(root, flatDir.X*chaseSpeed, flatDir.Z*chaseSpeed)
         else
-            _speedLVClear(root)
+            if _speedLVClear then pcall(_speedLVClear, root) end
         end
 
-        local desiredHeight=chasePos.Y+4.0
-        local yVel=(desiredHeight-root.Position.Y)*19.5
-        if hum.FloorMaterial~=Enum.Material.Air then yVel=math.max(yVel,13) end
-        yVel=math.clamp(yVel,-70,110)
-        local currentY=root.AssemblyLinearVelocity.Y
-        root.AssemblyLinearVelocity=Vector3.new(root.AssemblyLinearVelocity.X,currentY+(yVel-currentY)*0.8,root.AssemblyLinearVelocity.Z)
+        local desiredHeight=targetPos.Y
+        local yVel=(desiredHeight-myPos.Y)*24
+        yVel=math.clamp(yVel,-80,125)
+        local cur=root.AssemblyLinearVelocity
+        root.AssemblyLinearVelocity=Vector3.new(cur.X, cur.Y+(yVel-cur.Y)*0.92, cur.Z)
 
-        local equippedTool=char:FindFirstChildOfClass("Tool")
-        local isBatEquipped=equippedTool and (equippedTool.Name:lower():find("bat",1,true) or equippedTool.Name:lower():find("slap",1,true))
-        if Config.AutoSwing and Config.BatAimbot and State.autoBatToggled and isBatEquipped and actualDistance<=8 then
+        if flatDir.Magnitude>0.05 then
+            local lookAt=Vector3.new(aimPos.X, myPos.Y, aimPos.Z)
+            local goalCF=CFrame.lookAt(myPos, lookAt)
+            local alpha=1-math.exp(-math.clamp(dt or 0.016,0,0.1)*18)
+            root.CFrame=root.CFrame:Lerp(goalCF, alpha)
+        end
+
+        local toTarget=aimPos-myPos
+        if toTarget.Magnitude>0.1 then
+            local goalCF=CFrame.lookAt(myPos, aimPos)
+            local diffCF=root.CFrame:Inverse()*goalCF
+            local rx,ry,rz=diffCF:ToEulerAnglesXYZ()
+            rx=math.clamp(rx,-3.2,3.2)
+            ry=math.clamp(ry,-3.2,3.2)
+            rz=math.clamp(rz,-3.2,3.2)
+            root.AssemblyAngularVelocity=root.CFrame:VectorToWorldSpace(Vector3.new(rx*58, ry*58, rz*58))
+        end
+
+        local actualDistance=(targetPos-myPos).Magnitude
+        if Config.AutoSwing and Config.BatAimbot and State.autoBatToggled and isBatTool(bat) and actualDistance<=8 then
             tryBatSwing()
         end
     end)
@@ -5910,28 +5909,38 @@ function executeStealSemi(prompt, animalData)
     StealSys.totalDuration = HOLD_MAX
     updateStealProgress(0, "STEALING")
     task.spawn(function()
-        for _, fn in ipairs(data.hold) do task.spawn(fn) end
-        task.wait(HOLD_MIN)
-        local alreadyInRange = false
-        if animalData and animalData.worldPosition then
-            local char = LP.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                alreadyInRange = (hrp.Position - animalData.worldPosition).Magnitude <= STEAL_RANGE
-            end
-        else
-            alreadyInRange = stealPromptDist(prompt) <= STEAL_RANGE
+        local function liveRadius()
+            return math.max(1, tonumber(Config.AutoStealRadius) or 61)
         end
-        while true do
-            local el = tick() - StealSys.stealStart
-            if el > HOLD_MAX or not prompt.Parent then break end
-            local d = stealPromptDist(prompt)
+        local function distNow()
             if animalData and animalData.worldPosition then
                 local char = LP.Character
                 local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    d = (hrp.Position - animalData.worldPosition).Magnitude
-                end
+                if hrp then return (hrp.Position - animalData.worldPosition).Magnitude end
+            end
+            return stealPromptDist(prompt)
+        end
+        for _, fn in ipairs(data.hold) do task.spawn(fn) end
+        task.wait(HOLD_MIN)
+        if distNow() > liveRadius() then
+            data.ready = true
+            StealSys.isStealing = false
+            StealSys.stealStart = 0
+            resetStealProgress()
+            return
+        end
+        local alreadyInRange = distNow() <= STEAL_RANGE
+        while true do
+            local el = tick() - StealSys.stealStart
+            if el > HOLD_MAX or not prompt.Parent then break end
+            if not Config.AutoSteal then break end
+            local d = distNow()
+            if d > liveRadius() then
+                data.ready = true
+                StealSys.isStealing = false
+                StealSys.stealStart = 0
+                resetStealProgress()
+                return
             end
             if d <= STEAL_RANGE then
                 if not alreadyInRange then task.wait(ENTRY_DELAY) end
@@ -5969,7 +5978,6 @@ startAutoStealSystem = function()
         local mode = Config.AutoStealMode
 
         if mode == "Semi" then
-            radius = math.min(radius, 9)
             local target = nil
             local bestD = math.huge
             local char = LP.Character
@@ -6114,16 +6122,36 @@ end
 
 
 
-AP_L1 = Vector3.new(-476.47, -6.28, 92.73)
-AP_L2 = Vector3.new(-483.12, -4.95, 94.81)
-AP_R1 = Vector3.new(-476.16, -6.52, 25.62)
-AP_R2 = Vector3.new(-483.06, -5.03, 25.48)
+AP_LEFT_FULL = {
+    Vector3.new(-475.86, -7, 91.97),
+    Vector3.new(-485.83, -7, 97.37),
+    Vector3.new(-475.86, -7, 91.97),
+    Vector3.new(-476.35, -7, 27.88),
+    Vector3.new(-477.09, -7, 19.85),
+}
+AP_RIGHT_FULL = {
+    Vector3.new(-475.84, -7, 28.81),
+    Vector3.new(-486.04, -7, 23.32),
+    Vector3.new(-475.51, -7, 29.01),
+    Vector3.new(-476.43, -7, 91.61),
+    Vector3.new(-476.27, -7, 98.86),
+}
+AP_LEFT_HALF = {
+    Vector3.new(-476.48, -6.28, 92.73),
+    Vector3.new(-483.12, -4.95, 94.8),
+}
+AP_RIGHT_HALF = {
+    Vector3.new(-476.16, -6.52, 25.62),
+    Vector3.new(-483.06, -5.03, 25.48),
+}
+AP_L1 = AP_LEFT_HALF[1]
+AP_L2 = AP_LEFT_HALF[2]
+AP_R1 = AP_RIGHT_HALF[1]
+AP_R2 = AP_RIGHT_HALF[2]
+
 alConn, arConn = nil, nil
 alPhase, arPhase = 1, 1
-
-
 pathMoveDir = Vector3.zero
-
 
 function pathApplySpeed(hrp, hum, dir, spd)
     if not hrp or not hum then return end
@@ -6134,8 +6162,10 @@ function pathApplySpeed(hrp, hum, dir, spd)
         return
     end
     local unit = dir.Unit
-
-
+    pcall(function()
+        hum.AutoRotate = true
+        hum:Move(Vector3.new(unit.X, 0, unit.Z), false)
+    end)
     _speedLVSet(hrp, unit.X * spd, unit.Z * spd)
 end
 
@@ -6146,138 +6176,173 @@ function pathDirTo(hrp, target)
     return Vector3.zero
 end
 
+function peakDetectAutoPlaySide()
+    local plots = workspace:FindFirstChild("Plots")
+    if not plots then return "left" end
+    for _, plot in ipairs(plots:GetChildren()) do
+        local sign = plot:FindFirstChild("PlotSign")
+        local yourBase = sign and sign:FindFirstChild("YourBase")
+        if yourBase and yourBase:IsA("BillboardGui") and yourBase.Enabled then
+            local marker = plot:FindFirstChild("AnimalTarget", true)
+            local pos = marker and marker.Position
+            if not pos then
+                local delivery = plot:FindFirstChild("DeliveryHitbox")
+                pos = delivery and delivery.Position
+            end
+            if pos then
+                local dL = (pos - AP_LEFT_FULL[1]).Magnitude
+                local dR = (pos - AP_RIGHT_FULL[1]).Magnitude
+                return dL <= dR and "left" or "right"
+            end
+            local pivotPos
+            pcall(function()
+                if typeof(plot.GetPivot) == "function" then
+                    local piv = plot:GetPivot()
+                    if piv then pivotPos = piv.Position end
+                end
+            end)
+            if pivotPos then
+                return pivotPos.Z >= 60 and "right" or "left"
+            end
+            local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                return root.Position.Z >= 60 and "right" or "left"
+            end
+        end
+    end
+    return "left"
+end
 
+function peakGetAutoPlayWaypoints(side)
+    -- 1 Btn e 2 Btn: stesso path semi (half), left/right diversi
+    return side == "right" and AP_RIGHT_HALF or AP_LEFT_HALF
+end
 
-stopAutoLeft = function()
-    if alConn then alConn:Disconnect(); alConn = nil end
-    alPhase = 1
-    Config.AutoLeft = false
+function peakStopAutoPath(side)
+    if side == "left" then
+        if alConn then alConn:Disconnect(); alConn = nil end
+        alPhase = 1
+        Config.AutoLeft = false
+        if mobBtnRefs and mobBtnRefs.autoLeft then pcall(mobBtnRefs.autoLeft, false) end
+    else
+        if arConn then arConn:Disconnect(); arConn = nil end
+        arPhase = 1
+        Config.AutoRight = false
+        if mobBtnRefs and mobBtnRefs.autoRight then pcall(mobBtnRefs.autoRight, false) end
+    end
     pathMoveDir = Vector3.zero
-    if mobBtnRefs and mobBtnRefs.autoLeft then pcall(mobBtnRefs.autoLeft, false) end
     if Config.AutoPlayMode == "1 Btn" and mobBtnRefs and mobBtnRefs.autoPlay then
-        pcall(mobBtnRefs.autoPlay, false)
+        if not Config.AutoLeft and not Config.AutoRight then
+            pcall(mobBtnRefs.autoPlay, false)
+        end
     end
     local char = LP.Character
     if char then
         local h = char:FindFirstChildOfClass("Humanoid")
         local hrp = char:FindFirstChild("HumanoidRootPart")
-        if h then h:Move(Vector3.zero, false) end
+        if h then pcall(function() h:Move(Vector3.zero, false) end) end
         if hrp then
             _speedLVClear(hrp)
             hrp.AssemblyLinearVelocity = Vector3.new(0, hrp.AssemblyLinearVelocity.Y, 0)
         end
     end
-    saveConfig()
+end
+
+stopAutoLeft = function()
+    peakStopAutoPath("left")
 end
 
 stopAutoRight = function()
-    if arConn then arConn:Disconnect(); arConn = nil end
-    arPhase = 1
-    Config.AutoRight = false
+    peakStopAutoPath("right")
+end
+
+function peakRunAutoPath(side)
+    if safeModeTryStart and not safeModeTryStart() then return end
+    if side == "left" then
+        if arConn then stopAutoRight() end
+        if alConn then alConn:Disconnect(); alConn = nil end
+        Config.AutoLeft = true
+        Config.AutoRight = false
+        alPhase = 1
+    else
+        if alConn then stopAutoLeft() end
+        if arConn then arConn:Disconnect(); arConn = nil end
+        Config.AutoRight = true
+        Config.AutoLeft = false
+        arPhase = 1
+    end
     pathMoveDir = Vector3.zero
-    if mobBtnRefs and mobBtnRefs.autoRight then pcall(mobBtnRefs.autoRight, false) end
-    if Config.AutoPlayMode == "1 Btn" and mobBtnRefs and mobBtnRefs.autoPlay then
-        pcall(mobBtnRefs.autoPlay, false)
-    end
-    local char = LP.Character
-    if char then
-        local h = char:FindFirstChildOfClass("Humanoid")
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if h then h:Move(Vector3.zero, false) end
-        if hrp then
-            _speedLVClear(hrp)
-            hrp.AssemblyLinearVelocity = Vector3.new(0, hrp.AssemblyLinearVelocity.Y, 0)
+    local waypoints = peakGetAutoPlayWaypoints(side)
+    local wpIndex = 1
+    local missingSince = nil
+
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        local active = side == "left" and Config.AutoLeft or Config.AutoRight
+        if not active then return end
+        local char = LP.Character
+        if not char then
+            missingSince = missingSince or os.clock()
+            if os.clock() - missingSince > 5 then
+                if side == "left" then stopAutoLeft() else stopAutoRight() end
+            end
+            return
         end
+        missingSince = nil
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum or hum.Health <= 0 then return end
+        if isRagdollState and isRagdollState(hum) then
+            pathMoveDir = Vector3.zero
+            pcall(function() hum:Move(Vector3.zero, false) end)
+            return
+        end
+
+        local target = waypoints[wpIndex]
+        if not target then
+            if side == "left" then stopAutoLeft() else stopAutoRight() end
+            return
+        end
+
+        local flatPos = Vector3.new(hrp.Position.X, 0, hrp.Position.Z)
+        local flatTgt = Vector3.new(target.X, 0, target.Z)
+        local dist = (flatTgt - flatPos).Magnitude
+        local horizVel = Vector3.new(hrp.AssemblyLinearVelocity.X, 0, hrp.AssemblyLinearVelocity.Z)
+
+        if dist <= 1.1 and (horizVel.Magnitude < 28 or dist <= 0.4) then
+            pathApplySpeed(hrp, hum, Vector3.zero, 0)
+            if wpIndex >= #waypoints then
+                if side == "left" then stopAutoLeft() else stopAutoRight() end
+                return
+            end
+            wpIndex = wpIndex + 1
+            if side == "left" then alPhase = wpIndex else arPhase = wpIndex end
+            return
+        end
+
+        local dir = flatTgt - flatPos
+        if dir.Magnitude > 0.001 then dir = dir.Unit else dir = Vector3.zero end
+        pathMoveDir = dir
+        local spd = getPathSpeed()
+        if dist < 1.5 then
+            spd = spd * math.clamp(dist / 1.5, 0.6, 1)
+        end
+        pathApplySpeed(hrp, hum, dir, spd)
+    end)
+
+    if side == "left" then
+        alConn = conn
+    else
+        arConn = conn
     end
-    saveConfig()
 end
 
 startAutoLeft = function()
-    if safeModeTryStart and not safeModeTryStart() then return end
-    if arConn then stopAutoRight() end
-    if alConn then alConn:Disconnect(); alConn = nil end
-    Config.AutoLeft = true
-    alPhase = 1
-    pathMoveDir = Vector3.zero
-    alConn = RunService.Heartbeat:Connect(function()
-        if not Config.AutoLeft then return end
-        local char = LP.Character
-        if not char then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hrp or not hum or hum.Health <= 0 then return end
-        if isRagdollState(hum) then
-            pathMoveDir = Vector3.zero
-            hum:Move(Vector3.zero, false)
-            return
-        end
-
-        local spd = getPathSpeed()
-        if alPhase == 1 then
-            local tgt = Vector3.new(AP_L1.X, hrp.Position.Y, AP_L1.Z)
-            if (tgt - hrp.Position).Magnitude < 1.25 then
-                alPhase = 2
-            end
-            pathMoveDir = pathDirTo(hrp, AP_L1)
-            if alPhase == 2 then
-                pathMoveDir = pathDirTo(hrp, AP_L2)
-            end
-            pathApplySpeed(hrp, hum, pathMoveDir, spd)
-        elseif alPhase == 2 then
-            local tgt = Vector3.new(AP_L2.X, hrp.Position.Y, AP_L2.Z)
-            if (tgt - hrp.Position).Magnitude < 1.25 then
-                pathMoveDir = Vector3.zero
-                stopAutoLeft()
-                return
-            end
-            pathMoveDir = pathDirTo(hrp, AP_L2)
-            pathApplySpeed(hrp, hum, pathMoveDir, spd)
-        end
-    end)
+    peakRunAutoPath("left")
 end
 
 startAutoRight = function()
-    if safeModeTryStart and not safeModeTryStart() then return end
-    if alConn then stopAutoLeft() end
-    if arConn then arConn:Disconnect(); arConn = nil end
-    Config.AutoRight = true
-    arPhase = 1
-    pathMoveDir = Vector3.zero
-    arConn = RunService.Heartbeat:Connect(function()
-        if not Config.AutoRight then return end
-        local char = LP.Character
-        if not char then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hrp or not hum or hum.Health <= 0 then return end
-        if isRagdollState(hum) then
-            pathMoveDir = Vector3.zero
-            hum:Move(Vector3.zero, false)
-            return
-        end
-
-        local spd = getPathSpeed()
-        if arPhase == 1 then
-            local tgt = Vector3.new(AP_R1.X, hrp.Position.Y, AP_R1.Z)
-            if (tgt - hrp.Position).Magnitude < 1.25 then
-                arPhase = 2
-            end
-            pathMoveDir = pathDirTo(hrp, AP_R1)
-            if arPhase == 2 then
-                pathMoveDir = pathDirTo(hrp, AP_R2)
-            end
-            pathApplySpeed(hrp, hum, pathMoveDir, spd)
-        elseif arPhase == 2 then
-            local tgt = Vector3.new(AP_R2.X, hrp.Position.Y, AP_R2.Z)
-            if (tgt - hrp.Position).Magnitude < 1.25 then
-                pathMoveDir = Vector3.zero
-                stopAutoRight()
-                return
-            end
-            pathMoveDir = pathDirTo(hrp, AP_R2)
-            pathApplySpeed(hrp, hum, pathMoveDir, spd)
-        end
-    end)
+    peakRunAutoPath("right")
 end
 
 
@@ -6316,6 +6381,8 @@ RunService.PreSimulation:Connect(function()
                 pathApplySpeed(hrp2, hum2, pathMoveDir, getPathSpeed())
             end
         end
+    elseif State.autoBatToggled then
+        -- Bat Aimbot gestisce la velocity verso il target
     else
         applyVelocitySpeed(getActiveSpeed())
     end
@@ -6416,21 +6483,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
                 if stopAutoRight then stopAutoRight() end
                 if mobBtnRefs.autoPlay then pcall(mobBtnRefs.autoPlay, false) end
             else
-                -- Auto Play riutilizza i percorsi esistenti senza eseguire Drop all'avvio.
-                local plots = workspace:FindFirstChild("Plots")
-                local useLeft = true
-                if plots then
-                    for _, plot in ipairs(plots:GetChildren()) do
-                        local sign = plot:FindFirstChild("PlotSign")
-                        local yourBase = sign and sign:FindFirstChild("YourBase")
-                        if yourBase and yourBase.Enabled then
-                            local target = plot:FindFirstChild("AnimalTarget", true)
-                            local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-                            if target and root then useLeft = root.Position.X <= target.Position.X end
-                            break
-                        end
-                    end
-                end
+                local baseSide = peakDetectAutoPlaySide and peakDetectAutoPlaySide() or "left"
+                local useLeft = baseSide ~= "left"
                 if useLeft then
                     Config.AutoRight = false
                     if stopAutoRight then stopAutoRight() end
@@ -7182,20 +7236,8 @@ function buildMobileButtons()
                     if stopAutoRight then stopAutoRight() end
                     setVisual(false)
                 else
-                    local plots = workspace:FindFirstChild("Plots")
-                    local useLeft = true
-                    if plots then
-                        for _, plot in ipairs(plots:GetChildren()) do
-                            local sign = plot:FindFirstChild("PlotSign")
-                            local yourBase = sign and sign:FindFirstChild("YourBase")
-                            if yourBase and yourBase.Enabled then
-                                local target = plot:FindFirstChild("AnimalTarget", true)
-                                local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-                                if target and root then useLeft = root.Position.X <= target.Position.X end
-                                break
-                            end
-                        end
-                    end
+                    local baseSide = peakDetectAutoPlaySide and peakDetectAutoPlaySide() or "left"
+                    local useLeft = baseSide ~= "left"
                     if useLeft then
                         Config.AutoRight = false
                         if stopAutoRight then stopAutoRight() end
@@ -8490,7 +8532,7 @@ function playVyzeIntro()
     local Tw = TweenService
     local Sg = game:GetService("StarterGui")
     local pg = LP:WaitForChild("PlayerGui")
-    local D = 3.2
+    local D = 5.8
     local introAccent = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
     local introSoft = _G.PeakHubThemeSoft or COLORS.AccentSoft or Color3.fromRGB(100, 35, 0)
     local Silver1 = introAccent
@@ -8516,44 +8558,69 @@ function playVyzeIntro()
     gui.Parent = pg
     local introActive = true
 
+    local function resolveIntroMusicId(url)
+        url = tostring(url or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if url == "" then return nil end
+        local lower = string.lower(url)
+        if lower:match("^rbxassetid://%d+$") then return url end
+        if not (lower:sub(1, 8) == "https://" or lower:sub(1, 7) == "http://") then
+            return nil
+        end
+        local fileName = "PeakHub_IntroMusic_" .. tostring(url):match("([^/]+)$"):gsub("[^%w%.%-_]", "_")
+        local assetId = nil
+        pcall(function()
+            if isfile and isfile(fileName) then
+                if getcustomasset then assetId = getcustomasset(fileName)
+                elseif getsynasset then assetId = getsynasset(fileName) end
+            end
+        end)
+        if assetId then return assetId end
+        local data = nil
+        pcall(function() data = game:HttpGet(url) end)
+        if not data or #data < 100 then
+            pcall(function()
+                local req = request or http_request or (syn and syn.request)
+                if not req then return end
+                local res = req({Url = url, Method = "GET"})
+                if res then data = res.Body or res.body end
+            end)
+        end
+        if data and #data > 100 and writefile then
+            pcall(function() writefile(fileName, data) end)
+            pcall(function()
+                if getcustomasset then assetId = getcustomasset(fileName)
+                elseif getsynasset then assetId = getsynasset(fileName) end
+            end)
+        end
+        return assetId or url
+    end
 
     local snd = Instance.new("Sound")
     snd.Name = "PeakHubIntroMusic"
-    snd.SoundId = "rbxassetid://126107591945718"
-    snd.Volume = 0.7
+    snd.Volume = 0.75
     snd.Looped = false
     snd.RollOffMode = Enum.RollOffMode.InverseTapered
     snd.RollOffMinDistance = 10000
     snd.RollOffMaxDistance = 10000
-    snd.TimePosition = 34
     snd.Parent = game:GetService("SoundService")
+    _G.PeakHubIntroMusic = snd
 
-    task.spawn(function()
-        if not snd.IsLoaded then
-            local loaded = false
-            task.spawn(function()
-                pcall(function() snd.Loaded:Wait() end)
-                loaded = true
+    local musicUrl = Config.IntroMusicUrl or "https://files.catbox.moe/sdfi1j.mp3"
+    local id = resolveIntroMusicId(musicUrl)
+    if id then
+        pcall(function() snd.SoundId = id end)
+    end
+    pcall(function() snd:Play() end)
+    if not snd.IsPlaying then
+        task.spawn(function()
+            pcall(function()
+                if not snd.IsLoaded then snd.Loaded:Wait() end
             end)
-            local t = 0
-            while not loaded and t < 0.5 do
-                task.wait(0.05)
-                t = t + 0.05
+            if snd.Parent and not snd.IsPlaying then
+                pcall(function() snd:Play() end)
             end
-        end
-        if introActive and snd.Parent then
-            pcall(function() snd:Play() end)
-            task.delay(5, function()
-                pcall(function() snd:Stop() end)
-                pcall(function() snd:Destroy() end)
-            end)
-        else
-            pcall(function() snd:Destroy() end)
-        end
-    end)
-    gui.Destroying:Connect(function()
-        pcall(function() snd:Stop(); snd:Destroy() end)
-    end)
+        end)
+    end
 
     local skipBtn = Instance.new("TextButton", gui)
     skipBtn.Size = UDim2.new(0, 130, 0, 38)
@@ -8585,6 +8652,7 @@ function playVyzeIntro()
         pcall(function() if introBlur then introBlur:Destroy() end end)
         pcall(function() gui:Destroy() end)
         uf()
+        -- musica continua dopo skip/fine intro
     end)
 
 
@@ -8795,7 +8863,7 @@ function playVyzeIntro()
     end)
 
 
-    task.delay(2.0, function()
+    task.delay(3.6, function()
         if not introActive then return end
         for _, lt in ipairs(titleLetters) do
             tn(lt, 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {TextTransparency = 1}):Play()
@@ -8804,7 +8872,7 @@ function playVyzeIntro()
         tn(introDivider, 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {BackgroundTransparency = 1}):Play()
         tn(creatorCredit, 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {TextTransparency = 1}):Play()
     end)
-    task.delay(2.35, function()
+    task.delay(4.1, function()
         if not introActive then return end
 
         giant2.TextSize = 20
@@ -8818,7 +8886,7 @@ function playVyzeIntro()
     end)
 
 
-    task.delay(3.1, function()
+    task.delay(5.2, function()
         if not introActive then return end
         tn(giant2, 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {TextTransparency = 1, TextSize = 220}):Play()
         tn(bgGrad, 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {BackgroundTransparency = 1}):Play()
@@ -8835,7 +8903,6 @@ function playVyzeIntro()
 end
 
 task.spawn(function()
-    task.wait(0.4)
     pcall(playVyzeIntro)
 end)
 

@@ -4364,6 +4364,105 @@ end
 
 
 
+-- Peak Hub Instant Reset: adapted from Clean Hub and wired to keyboard/gamepad/mobile controls.
+local peakResetCooldown = false
+local peakResetThread = nil
+local peakResetCameraLocked = false
+local peakResetCameraCFrame = nil
+local peakLastResetRequest = 0
+local peakResetCharacterConnection = nil
+
+local function peakInstantReset()
+    local now = os.clock()
+    if now - peakLastResetRequest < 0.75 or peakResetCooldown then return end
+    peakLastResetRequest = now
+
+    local character = LP and LP.Character
+    if not character or not character.Parent then return end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return end
+
+    peakResetCooldown = true
+    _isInstaResetting = true -- Prevent AntiDie from restoring health during the reset.
+    peakResetCameraLocked = false
+    local camera = workspace.CurrentCamera
+    if camera then
+        peakResetCameraCFrame = camera.CFrame
+        peakResetCameraLocked = true
+    end
+
+    if peakResetThread then pcall(task.cancel, peakResetThread); peakResetThread = nil end
+    peakResetThread = task.spawn(function()
+        local savedHipHeight = humanoid.HipHeight
+        local savedAutoRotate = humanoid.AutoRotate
+        local savedCollision = {}
+        local success = false
+        local attempts = 0
+
+        while attempts < 40 and character.Parent and humanoid.Parent and humanoid.Health > 0 do
+            if not LP or LP.Character ~= character then success = true; break end
+            pcall(function()
+                humanoid.HipHeight = 1e30
+                humanoid.AutoRotate = true
+                for _, part in ipairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        if savedCollision[part] == nil then savedCollision[part] = part.CanCollide end
+                        part.CanCollide = false
+                    end
+                end
+            end)
+            attempts += 1
+            task.wait(0.05)
+        end
+
+        if not success and character.Parent and humanoid.Parent and humanoid.Health > 0 and LP.Character == character then
+            pcall(function() humanoid.Health = 0 end)
+            task.wait(0.15)
+            success = (not character.Parent) or (not humanoid.Parent) or humanoid.Health <= 0 or LP.Character ~= character
+        else
+            success = success or (not character.Parent) or (not humanoid.Parent) or humanoid.Health <= 0 or LP.Character ~= character
+        end
+
+        if not success and character.Parent and humanoid.Parent then
+            pcall(function()
+                humanoid.HipHeight = savedHipHeight
+                humanoid.AutoRotate = savedAutoRotate
+                for part, canCollide in pairs(savedCollision) do
+                    if part and part.Parent then part.CanCollide = canCollide end
+                end
+            end)
+        end
+
+        peakResetCameraLocked = false
+        peakResetCameraCFrame = nil
+        peakResetThread = nil
+        peakResetCooldown = false
+        _isInstaResetting = false
+    end)
+end
+
+_G.PeakHubInstantReset = peakInstantReset
+_G.InstaReset = { Trigger = peakInstantReset }
+
+if peakResetCharacterConnection then pcall(function() peakResetCharacterConnection:Disconnect() end) end
+peakResetCharacterConnection = LP.CharacterAdded:Connect(function()
+    peakResetCameraLocked = false
+    peakResetCameraCFrame = nil
+    peakResetCooldown = false
+    _isInstaResetting = false
+    peakResetThread = nil
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.016)
+        local camera = workspace.CurrentCamera
+        if peakResetCameraLocked and peakResetCameraCFrame and camera then
+            pcall(function() camera.CFrame = peakResetCameraCFrame end)
+        end
+    end
+end)
+
 antiDieHeartConn = nil
 antiDieDeathConns = {}
 antiDieCharConn = nil
@@ -6588,11 +6687,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
     elseif is(Config.TPDownKey) then
         if processed then return end
         if canStart("tpDown") then performTPDown(); saveConfig() end
-    elseif is(Config.InstaResetKey) then
-        if canStart("reset") and type(cursedInstaReset) == "function" then
-            pcall(cursedInstaReset)
-            saveConfig()
-        end
+    elseif (isKb and is(Config.InstaResetKey)) or (isPad and is(Config.InstaResetGamepadKey)) then
+        if not processed then peakInstantReset() end
         return
     elseif processed then
         return
@@ -6719,7 +6815,7 @@ _G.__VyzeActionKeyConnection = UserInputService.InputBegan:Connect(function(inpu
         return
     end
     if resetKey ~= "" and keyName == resetKey then
-        if safeModeAllowsAction("reset") then pcall(cursedInstaReset); saveConfig() end
+        peakInstantReset()
         return
     end
     if tpDownKey ~= "" and keyName == tpDownKey then
@@ -6913,122 +7009,11 @@ function runDrop() if dropActive then return end;local c=LP.Character;if not c t
 
 resetting = false
 
-function cursedInstaReset()
-    if resetting then return end
-    local character = LP.Character
-    if not character then return end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or not hrp then return end
-
-    resetting = true
-    _isInstaResetting = true
-    Config._instaResetInProgress = true
-    local prevAntiDie = antiDieActive
-    antiDieActive = false
-
-    local camera = workspace.CurrentCamera
-    local savedCameraType = camera and camera.CameraType
-    local savedCameraCFrame = camera and camera.CFrame
-    pcall(function()
-        if camera then
-            camera.CameraType = Enum.CameraType.Scriptable
-            if savedCameraCFrame then camera.CFrame = savedCameraCFrame end
-        end
-    end)
-
-    local respawnConn
-    local finished = false
-    local function finishReset(newChar)
-        if finished then return end
-        finished = true
-        pcall(function()
-            local cam = workspace.CurrentCamera
-            if cam then
-                cam.CameraType = Enum.CameraType.Custom
-                local newHum = newChar and newChar:FindFirstChildOfClass("Humanoid")
-                if newHum then cam.CameraSubject = newHum end
-            end
-        end)
-        antiDieActive = prevAntiDie
-        _isInstaResetting = false
-        Config._instaResetInProgress = false
-        resetting = false
-        if respawnConn then
-            pcall(function() respawnConn:Disconnect() end)
-            respawnConn = nil
-        end
-    end
-
-    respawnConn = LP.CharacterAdded:Connect(function(newChar)
-        task.spawn(function()
-            local deadline = os.clock() + 8
-            local newHum
-            repeat
-                newHum = newChar:FindFirstChildOfClass("Humanoid")
-                if newHum then break end
-                task.wait(0.05)
-            until os.clock() >= deadline
-            finishReset(newChar)
-        end)
-    end)
-
-    task.spawn(function()
-        local savedPlatformStand = humanoid.PlatformStand
-        local savedBreakJoints = humanoid.BreakJointsOnDeath
-        local deadline = os.clock() + 0.3
-
-        local function applyV2(hum, root)
-            hum.BreakJointsOnDeath = true
-            hum.PlatformStand = true
-            hum:ChangeState(Enum.HumanoidStateType.Physics)
-            root.AssemblyAngularVelocity = Vector3.zero
-            root.AssemblyLinearVelocity = Vector3.new(0, 1e6, 0)
-        end
-
-        for _ = 1, 8 do
-            local ch = LP.Character
-            if ch ~= character or not character.Parent or humanoid.Health <= 0 then
-                finishReset(LP.Character)
-                return
-            end
-            local root = ch:FindFirstChild("HumanoidRootPart")
-            local hum = ch:FindFirstChildOfClass("Humanoid")
-            if root and hum then pcall(applyV2, hum, root) end
-        end
-
-        while os.clock() < deadline do
-            RunService.Heartbeat:Wait()
-            local ch = LP.Character
-            if ch ~= character or not character.Parent or humanoid.Health <= 0 then
-                return -- CharacterAdded si occupa del ripristino camera/stato
-            end
-            local root = ch:FindFirstChild("HumanoidRootPart")
-            local hum = ch:FindFirstChildOfClass("Humanoid")
-            if root and hum then pcall(applyV2, hum, root) end
-        end
-
-        if LP.Character == character and character.Parent and humanoid.Health > 0 then
-            pcall(function()
-                humanoid.PlatformStand = savedPlatformStand
-                humanoid.BreakJointsOnDeath = savedBreakJoints
-                humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-                local root = character:FindFirstChild("HumanoidRootPart")
-                if root then root.AssemblyLinearVelocity = Vector3.zero end
-            end)
-            finishReset(character)
-        end
-    end)
-
-    task.delay(8, function()
-        if resetting then finishReset(LP.Character) end
-    end)
-end
-
 MOB_POS_FILE = "VyzeCC2_MobPos.json"
 mobGuiRef = nil
 
 mobBtnFrames = {}
+
 function loadMobPos()
     local out = {}
     pcall(function()
@@ -7402,9 +7387,8 @@ function buildMobileButtons()
                     setVisual(false)
                 end)
             elseif def.key == "reset" then
-                if not safeModeAllowsAction("reset") then setVisual(false); return end
                 setVisual(true)
-                cursedInstaReset()
+                peakInstantReset()
                 task.delay(0.6, function() setVisual(false) end)
             elseif def.key == "tpDown" then
                 if not safeModeAllowsAction("tpDown") then setVisual(false); return end
@@ -7674,12 +7658,9 @@ function updatePlayerEsp(plr)
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local cam = workspace.CurrentCamera
-    if not hrp or not myHrp or not cam then clearEspFor(plr); return end
-
+    if not hrp or not cam then clearEspFor(plr); return end
     local o = _espObjects[plr]
     if not o then o = {}; _espObjects[plr] = o end
-
-
     if playerEspEnabled then
         if not o.highlight or not o.highlight.Parent then
             local hl = Instance.new("Highlight")
@@ -7698,6 +7679,13 @@ function updatePlayerEsp(plr)
     elseif o.highlight then
         pcall(function() o.highlight:Destroy() end)
         o.highlight = nil
+    end
+    if not myHrp then
+        if o.line then
+            if typeof(o.line) == "Instance" then o.line.Visible = false
+            else pcall(function() o.line.Visible = false end) end
+        end
+        return
     end
 
     if not playerTracersEnabled then
@@ -7796,6 +7784,23 @@ stopPlayerTracers = function()
 end
 
 Players.PlayerRemoving:Connect(function(plr) clearEspFor(plr) end)
+
+LP.CharacterAdded:Connect(function()
+    task.defer(function()
+        task.wait(0.35)
+        if Config.PlayerESP then
+            playerEspEnabled = true
+            if startPlayerEsp then pcall(startPlayerEsp) end
+        end
+        if Config.PlayerESP or Config.PlayerTracers then
+            if Config.PlayerESP then Config.PlayerTracers = true end
+            playerTracersEnabled = Config.PlayerTracers == true
+            if playerTracersEnabled and startPlayerTracers then pcall(startPlayerTracers) end
+        end
+        if refreshAllEsp then pcall(refreshAllEsp) end
+    end)
+end)
+
 
 
 ragdollCountdownConn, ragdollCountdownCharConn = nil, nil

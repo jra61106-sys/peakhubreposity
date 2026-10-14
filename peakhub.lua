@@ -1,6 +1,3 @@
-
-
-
 TweenService = game:GetService("TweenService")
 RunService = game:GetService("RunService")
 Players = game:GetService("Players")

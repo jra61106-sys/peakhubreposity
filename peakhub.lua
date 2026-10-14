@@ -88,7 +88,7 @@ Config = {
     HideUI = false,
     HideUIKey = "RightControl",
     MobileButtonSize = 50,
-    StealBarSize = 50,
+    StealBarSize = 40,
     UIBackgroundIndex = 1,
     CircleButtons = false,
     HideButtons = false,
@@ -451,23 +451,23 @@ function getMaxFitScale()
 end
 
 function getUserBaseScale()
-    return math.clamp((tonumber(Config.UIScale) or 40) / 50, 0.2, 2)
+    return math.clamp((tonumber(Config.UIScale) or 40) / 40, 0.2, 2)
 end
 
 function getEffectiveUIScale()
     local base = getUserBaseScale()
     if not UserInputService.TouchEnabled then
-        return base * 0.96
+        return math.clamp(base * 0.96, 0.2, 2)
     end
-    return math.clamp(math.min(base, getMaxFitScale()), 0.28, 1.2)
+    return math.clamp(base, 0.28, 2)
 end
 
 function getFitScaleForViewport(base)
     base = math.clamp(tonumber(base) or getUserBaseScale(), 0.15, 2)
     if not UserInputService.TouchEnabled then
-        return base * 0.96
+        return math.clamp(base * 0.96, 0.2, 2)
     end
-    return math.clamp(math.min(base, getMaxFitScale()), 0.28, 1.2)
+    return math.clamp(base, 0.28, 2)
 end
 
 function refreshDeviceLayout(forcePosition)
@@ -3764,7 +3764,7 @@ end
 
 
 do
-    Config.StealBarSize = math.clamp(tonumber(Config.StealBarSize) or 50, 35, 90)
+    Config.StealBarSize = math.clamp(tonumber(Config.StealBarSize) or 40, 20, 90)
     local row = rowBase(settings, "Steal Bar Size", false)
     local valLbl = Instance.new("TextLabel")
     valLbl.BackgroundTransparency = 1
@@ -3773,7 +3773,7 @@ do
     valLbl.Font = Enum.Font.GothamBold
     valLbl.TextSize = 13
     valLbl.TextColor3 = COLORS.White
-    valLbl.Text = tostring(Config.StealBarSize or 50)
+    valLbl.Text = tostring(Config.StealBarSize or 40)
     valLbl.TextXAlignment = Enum.TextXAlignment.Center
     valLbl.Parent = row
     local function mkArr(txt, x)
@@ -3794,13 +3794,13 @@ do
     local left = mkArr("<", -156)
     local right = mkArr(">", -64)
     left.Activated:Connect(function()
-        Config.StealBarSize = math.clamp((Config.StealBarSize or 50) - 5, 35, 90)
+        Config.StealBarSize = math.clamp((Config.StealBarSize or 40) - 5, 20, 90)
         valLbl.Text = tostring(Config.StealBarSize)
         if StealSys and StealSys.applyBarSize then StealSys.applyBarSize() end
         saveConfig()
     end)
     right.Activated:Connect(function()
-        Config.StealBarSize = math.clamp((Config.StealBarSize or 50) + 5, 35, 90)
+        Config.StealBarSize = math.clamp((Config.StealBarSize or 40) + 5, 20, 90)
         valLbl.Text = tostring(Config.StealBarSize)
         if StealSys and StealSys.applyBarSize then StealSys.applyBarSize() end
         saveConfig()
@@ -5363,7 +5363,7 @@ function initStealProgressUI()
     spGui.Parent = playerGui
 
     local function stealBarWidth()
-        local s = math.clamp(tonumber(Config.StealBarSize) or 50, 35, 90)
+        local s = math.clamp(tonumber(Config.StealBarSize) or 40, 20, 90)
         return math.floor(s * 6)
     end
     local barW = stealBarWidth()
@@ -5487,8 +5487,8 @@ function initStealProgressUI()
     end
 
     function StealSys.applyBarSize()
-        local s = math.clamp(tonumber(Config.StealBarSize) or 50, 35, 90)
-        local scale = s / 50
+        local s = math.clamp(tonumber(Config.StealBarSize) or 40, 20, 90)
+        local scale = s / 40
         local w = math.floor(s * 6)
         local h = math.floor(53 * scale)
         local trackH = math.max(7, math.floor(8 * scale))
@@ -9100,43 +9100,35 @@ end
 
 function playVyzeIntro()
     if Config.IntroEnabled == false then return end
+
     local Tw = TweenService
-    local Sg = game:GetService("StarterGui")
-    local pg = LP:WaitForChild("PlayerGui")
-    local D = 5.8
-    local introAccent = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
-    local introSoft = _G.PeakHubThemeSoft or COLORS.AccentSoft or Color3.fromRGB(100, 35, 0)
-    local Silver1 = introAccent
-    local Silver2 = introAccent
-    local Silver3 = introAccent
-    local Silver4 = introSoft
-    local Purple = introAccent
+    local ACCENT = _G.PeakHubThemeAccent or COLORS.Accent or Color3.fromRGB(255, 120, 0)
+    local WHITE = Color3.fromRGB(255, 255, 255)
+    local Soft = _G.PeakHubThemeSoft or COLORS.AccentSoft or Color3.fromRGB(100, 35, 0)
 
-    local introBlur
-    local function tn(i, t, st, dr, pr2)
-        return Tw:Create(i, TweenInfo.new(t, st, dr), pr2)
+    local function tween(obj, time, props, style, dir)
+        local t = Tw:Create(obj, TweenInfo.new(time, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out), props)
+        t:Play()
+        return t
     end
-    pcall(function() Sg:SetCore("TopbarEnabled", false) end)
-    local function uf() pcall(function() Sg:SetCore("TopbarEnabled", true) end) end
 
-    local ex = pg:FindFirstChild("VyzeIntro")
-    if ex then ex:Destroy() end
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "VyzeIntro"
-    gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.DisplayOrder = 1000
-    gui.Parent = pg
-    local introActive = true
+    local function round(obj, radius)
+        local c = Instance.new("UICorner")
+        c.CornerRadius = radius or UDim.new(1, 0)
+        c.Parent = obj
+        return c
+    end
+
+    local MUSIC_URL = Config.IntroMusicUrl or "https://files.catbox.moe/sdfi1j.mp3"
+    local MUSIC_VOLUME = 0.6
+    local MUSIC_START = 0
 
     local function resolveIntroMusicId(url)
         url = tostring(url or ""):gsub("^%s+", ""):gsub("%s+$", "")
         if url == "" then return nil end
         local lower = string.lower(url)
         if lower:match("^rbxassetid://%d+$") then return url end
-        if not (lower:sub(1, 8) == "https://" or lower:sub(1, 7) == "http://") then
-            return nil
-        end
+        if not (lower:sub(1, 8) == "https://" or lower:sub(1, 7) == "http://") then return nil end
         local fileName = "PeakHub_IntroMusic_" .. tostring(url):match("([^/]+)$"):gsub("[^%w%.%-_]", "_")
         local assetId = nil
         pcall(function()
@@ -9163,312 +9155,331 @@ function playVyzeIntro()
                 elseif getsynasset then assetId = getsynasset(fileName) end
             end)
         end
-        return assetId or url
+        return assetId
     end
 
-    local snd = Instance.new("Sound")
-    snd.Name = "PeakHubIntroMusic"
-    snd.Volume = 0.75
-    snd.Looped = false
-    snd.RollOffMode = Enum.RollOffMode.InverseTapered
-    snd.RollOffMinDistance = 10000
-    snd.RollOffMaxDistance = 10000
-    snd.Parent = game:GetService("SoundService")
-    _G.PeakHubIntroMusic = snd
-
-    local musicUrl = Config.IntroMusicUrl or "https://files.catbox.moe/sdfi1j.mp3"
-    local id = resolveIntroMusicId(musicUrl)
-    if id then
-        pcall(function() snd.SoundId = id end)
-    end
-    pcall(function() snd:Play() end)
-    if not snd.IsPlaying then
-        task.spawn(function()
-            pcall(function()
-                if not snd.IsLoaded then snd.Loaded:Wait() end
-            end)
-            if snd.Parent and not snd.IsPlaying then
-                pcall(function() snd:Play() end)
-            end
-        end)
-    end
-
-    local skipBtn = Instance.new("TextButton", gui)
-    skipBtn.Size = UDim2.new(0, 130, 0, 38)
-    skipBtn.Position = UDim2.new(1, -160, 0, 20)
-    skipBtn.BackgroundColor3 = introAccent
-    skipBtn.BackgroundTransparency = 0.85
-    skipBtn.BorderSizePixel = 0
-    skipBtn.Text = "SKIP INTRO"
-    skipBtn.TextColor3 = introAccent
-    skipBtn.TextTransparency = 1
-    skipBtn.Font = Enum.Font.GothamBold
-    skipBtn.TextSize = 13
-    skipBtn.ZIndex = 50
-    skipBtn.AutoButtonColor = false
-    Instance.new("UICorner", skipBtn).CornerRadius = UDim.new(1, 0)
-    local skipStroke = Instance.new("UIStroke", skipBtn)
-    skipStroke.Color = introAccent
-    skipStroke.Thickness = 1
-    skipStroke.Transparency = 1
-    task.delay(0.4, function()
-        tn(skipBtn, 0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out, {
-            Position = UDim2.new(1, -145, 0, 20), TextTransparency = 0, BackgroundTransparency = 0.75
-        }):Play()
-        tn(skipStroke, 0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, {Transparency = 0.4}):Play()
-    end)
-    skipBtn.Activated:Connect(function()
-        if not introActive then return end
-        introActive = false
-        pcall(function() if introBlur then introBlur:Destroy() end end)
-        pcall(function() gui:Destroy() end)
-        uf()
-    end)
-
-
-    pcall(function()
-        local old = Lighting:FindFirstChild("VyzeIntroBlur")
-        if old then old:Destroy() end
-    end)
-    introBlur = Instance.new("BlurEffect")
-    introBlur.Name = "VyzeIntroBlur"
-    introBlur.Size = 0
-    introBlur.Parent = Lighting
-    tn(introBlur, 0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, {Size = 22}):Play()
-
-    local bgGrad = Instance.new("Frame", gui)
-    bgGrad.Size = UDim2.new(1, 0, 1, 0)
-    bgGrad.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    bgGrad.BackgroundTransparency = 1
-    bgGrad.BorderSizePixel = 0
-    bgGrad.Active = false
-    bgGrad.ZIndex = 1
-    tn(bgGrad, 0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, {BackgroundTransparency = 0.55}):Play()
-
-
-    local ringContainer = Instance.new("Frame", gui)
-    ringContainer.Size = UDim2.new(0, 160, 0, 160)
-    ringContainer.AnchorPoint = Vector2.new(0.5, 0.5)
-    ringContainer.Position = UDim2.new(0.5, 0, 0.28, 0)
-    ringContainer.BackgroundTransparency = 1
-    ringContainer.Visible = false
-    ringContainer.ZIndex = 5
-
-    local ring = Instance.new("Frame", ringContainer)
-    ring.Size = UDim2.new(1, 0, 1, 0)
-    ring.BackgroundTransparency = 1
-    local ringStroke = Instance.new("UIStroke", ring)
-    ringStroke.Thickness = 2
-    ringStroke.Color = Purple
-    ringStroke.Transparency = 0.5
+    local musicId = nil
+    local musicDone = false
     task.spawn(function()
-        while gui.Parent and introActive do
-            task.wait()
-            ring.Rotation = (ring.Rotation + 1.5) % 360
-        end
+        musicId = resolveIntroMusicId(MUSIC_URL)
+        musicDone = true
     end)
-
-    local letterFrame = Instance.new("Frame", ringContainer)
-    letterFrame.Size = UDim2.new(0, 90, 0, 90)
-    letterFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-    letterFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-    letterFrame.BackgroundTransparency = 1
-    letterFrame.ZIndex = 6
-
-    local function makeLetter(ch, ax, ay)
-        local lb = Instance.new("TextLabel", letterFrame)
-        lb.Size = UDim2.new(0.5, -4, 0.5, -4)
-        lb.Position = UDim2.new(ax, 2, ay, 2)
-        lb.BackgroundTransparency = 1
-        lb.Text = ch
-        lb.TextColor3 = Purple
-        lb.Font = Enum.Font.GothamBlack
-        lb.TextScaled = true
-        lb.TextTransparency = 1
-        lb.ZIndex = 7
-        local g = Instance.new("UIGradient", lb)
-        g.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 180, 80)),
-            ColorSequenceKeypoint.new(0.5, Purple),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 180, 80)),
-        })
-        return lb
+    local waitStart = os.clock()
+    while not musicDone and os.clock() - waitStart < 2 do
+        task.wait()
     end
 
-    local L_V = makeLetter("V", 0, 0)
-    local L_Y = makeLetter("Y", 0.5, 0)
-    local L_Z = makeLetter("Z", 0, 0.5)
-    local L_E = makeLetter("E", 0.5, 0.5)
+    local music
+    if musicId then
+        music = Instance.new("Sound")
+        music.Name = "PeakHubIntroMusic"
+        music.SoundId = musicId
+        music.Volume = 0
+        music.Looped = false
+        music.Parent = game:GetService("SoundService")
+        _G.PeakHubIntroMusic = music
+        pcall(function()
+            if music.TimeLength > MUSIC_START then music.TimePosition = MUSIC_START end
+        end)
+        music.Ended:Connect(function()
+            pcall(function() music:Destroy() end)
+        end)
+        music:Play()
+        tween(music, 0.8, { Volume = MUSIC_VOLUME }, Enum.EasingStyle.Sine)
+    end
 
+    local blur = Instance.new("BlurEffect")
+    blur.Size = 0
+    blur.Parent = Lighting
+    tween(blur, 1, { Size = 28 })
 
-    local peakTitle = Instance.new("TextLabel", gui)
-    peakTitle.Name = "PeakHubIntroTitle"
-    peakTitle.Size = UDim2.new(1, -40, 0, 110)
-    peakTitle.AnchorPoint = Vector2.new(0.5, 0.5)
-    peakTitle.Position = UDim2.new(0.5, 0, 0.5, 0)
-    peakTitle.BackgroundTransparency = 1
-    peakTitle.Text = "PEAK HUB"
-    peakTitle.TextColor3 = introAccent
-    peakTitle.Font = Enum.Font.GothamBlack
-    peakTitle.TextScaled = true
-    peakTitle.TextTransparency = 1
-    peakTitle.ZIndex = 15
-    peakTitle.TextStrokeTransparency = 0.45
-    peakTitle.TextStrokeColor3 = introSoft
-    local peakTitleConstraint = Instance.new("UITextSizeConstraint", peakTitle)
-    peakTitleConstraint.MaxTextSize = 76
-    peakTitleConstraint.MinTextSize = 24
-    local peakTitleGradient = Instance.new("UIGradient", peakTitle)
-    peakTitleGradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, introAccent:Lerp(Color3.fromRGB(255, 255, 255), 0.28)),
-        ColorSequenceKeypoint.new(0.5, introAccent),
-        ColorSequenceKeypoint.new(1, introAccent:Lerp(Color3.fromRGB(255, 255, 255), 0.28)),
+    local pg = LP:WaitForChild("PlayerGui")
+    local old = pg:FindFirstChild("PeakHubIntro") or pg:FindFirstChild("VyzeIntro")
+    if old then pcall(function() old:Destroy() end) end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "PeakHubIntro"
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 9999
+    gui.Parent = pg
+
+    local introActive = true
+    local running = true
+
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.fromScale(1, 1)
+    bg.BackgroundColor3 = Color3.fromRGB(8, 6, 4)
+    bg.BorderSizePixel = 0
+    bg.BackgroundTransparency = 1
+    bg.ClipsDescendants = true
+    bg.Parent = gui
+
+    local bgGradient = Instance.new("UIGradient")
+    bgGradient.Rotation = 90
+    bgGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(8, 6, 4)),
+        ColorSequenceKeypoint.new(0.55, Soft),
+        ColorSequenceKeypoint.new(1, ACCENT),
     })
+    bgGradient.Parent = bg
+    tween(bg, 0.8, { BackgroundTransparency = 0.05 })
 
-    local introDivider = Instance.new("Frame", gui)
-    introDivider.Name = "PeakHubIntroDivider"
-    introDivider.AnchorPoint = Vector2.new(0.5, 0.5)
-    introDivider.Size = UDim2.new(0, 170, 0, 2)
-    introDivider.Position = UDim2.new(0.5, 0, 0.585, 0)
-    introDivider.BackgroundColor3 = introAccent
-    introDivider.BackgroundTransparency = 1
-    introDivider.BorderSizePixel = 0
-    introDivider.ZIndex = 15
-
-    local creatorCredit = Instance.new("TextLabel", gui)
-    creatorCredit.Name = "PeakHubIntroCreatorCredit"
-    creatorCredit.AnchorPoint = Vector2.new(0.5, 0.5)
-    creatorCredit.Size = UDim2.new(1, -40, 0, 28)
-    creatorCredit.Position = UDim2.new(0.5, 0, 0.625, 0)
-    creatorCredit.BackgroundTransparency = 1
-    creatorCredit.Text = "by axis / by espo"
-    creatorCredit.TextColor3 = Color3.fromRGB(255, 255, 255)
-    creatorCredit.Font = Enum.Font.GothamMedium
-    creatorCredit.TextSize = 16
-    creatorCredit.TextTransparency = 1
-    creatorCredit.ZIndex = 15
-
-
-    local function bw(word, yp, tc, sz, sp)
-        local co = Instance.new("Frame", gui)
-        co.Size = UDim2.new(1, 0, 0, sz + 10)
-        co.Position = UDim2.new(0, 0, yp, 0)
-        co.BackgroundTransparency = 1
-        co.ZIndex = 5
-        local lo = Instance.new("UIListLayout", co)
-        lo.FillDirection = Enum.FillDirection.Horizontal
-        lo.HorizontalAlignment = Enum.HorizontalAlignment.Center
-        lo.VerticalAlignment = Enum.VerticalAlignment.Center
-        lo.Padding = UDim.new(0, sp or 2)
-        local le = {}
-        for i = 1, #word do
-            local lb = Instance.new("TextLabel", co)
-            lb.LayoutOrder = i
-            lb.Size = UDim2.new(0, sz * 0.55, 0, sz)
-            lb.BackgroundTransparency = 1
-            lb.Text = word:sub(i, i)
-            lb.TextColor3 = tc
-            lb.Font = Enum.Font.GothamBlack
-            lb.TextScaled = true
-            lb.TextTransparency = 1
-            lb.ZIndex = 5
-            local grad = Instance.new("UIGradient", lb)
-            grad.Color = ColorSequence.new({
-                ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 180, 80)),
-                ColorSequenceKeypoint.new(0.45, Purple),
-                ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 180, 80)),
-            })
-            grad.Offset = Vector2.new(-0.8, 0)
-            le[i] = lb
-        end
-        return le
-    end
-    local titleLetters = {}
-
-
-    local giant2 = Instance.new("TextLabel", gui)
-    giant2.Size = UDim2.new(1, 0, 0, 220)
-    giant2.Position = UDim2.new(0, 0, 0.35, 0)
-    giant2.BackgroundTransparency = 1
-    giant2.Text = ""
-    giant2.TextColor3 = Purple
-    giant2.Font = Enum.Font.GothamBlack
-    giant2.TextSize = 20
-    giant2.TextTransparency = 1
-    giant2.ZIndex = 20
-    giant2.TextStrokeTransparency = 0.4
-    giant2.TextStrokeColor3 = Color3.new(0,0,0)
-
-
-    local particleContainer = Instance.new("Frame", gui)
-    particleContainer.Size = UDim2.new(1, 0, 1, 0)
-    particleContainer.BackgroundTransparency = 1
-    particleContainer.ZIndex = 4
-    for i = 1, 30 do
-        local dot = Instance.new("Frame", particleContainer)
-        local size = math.random(2, 5)
-        dot.Size = UDim2.new(0, size, 0, size)
-        dot.Position = UDim2.new(math.random(), 0, math.random(), 0)
-        dot.BackgroundColor3 = Purple
-        dot.BackgroundTransparency = 0.3 + math.random() * 0.5
-        dot.BorderSizePixel = 0
-        Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+    local rng = Random.new()
+    for _ = 1, 70 do
+        task.spawn(function()
+            local s = Instance.new("Frame")
+            local size = rng:NextInteger(2, 5)
+            s.Size = UDim2.fromOffset(size, size)
+            s.BackgroundColor3 = (rng:NextNumber() > 0.5) and ACCENT or WHITE
+            s.BorderSizePixel = 0
+            s.BackgroundTransparency = 1
+            s.Position = UDim2.fromScale(rng:NextNumber(), 1.05)
+            s.ZIndex = 1
+            s.Parent = bg
+            round(s)
+            task.wait(rng:NextNumber() * 3)
+            while running and introActive and s.Parent do
+                local dur = rng:NextNumber(3, 6)
+                s.Position = UDim2.fromScale(rng:NextNumber(), 1.05)
+                s.BackgroundTransparency = 1
+                tween(s, dur * 0.2, { BackgroundTransparency = rng:NextNumber(0.2, 0.6) }, Enum.EasingStyle.Sine)
+                local t = tween(s, dur, { Position = UDim2.fromScale(s.Position.X.Scale + rng:NextNumber(-0.05, 0.05), -0.05) }, Enum.EasingStyle.Linear)
+                task.delay(dur * 0.8, function()
+                    if s.Parent then tween(s, dur * 0.2, { BackgroundTransparency = 1 }, Enum.EasingStyle.Sine) end
+                end)
+                t.Completed:Wait()
+            end
+            if s then pcall(function() s:Destroy() end) end
+        end)
     end
 
+    local ring = Instance.new("Frame")
+    ring.AnchorPoint = Vector2.new(0.5, 0.5)
+    ring.Position = UDim2.fromScale(0.5, 0.5)
+    ring.Size = UDim2.fromOffset(0, 0)
+    ring.BackgroundTransparency = 1
+    ring.ZIndex = 2
+    ring.Parent = bg
+    round(ring)
 
-    task.delay(0.05, function()
-        if introActive then
-            tn(peakTitle, 0.55, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, {TextTransparency = 0}):Play()
-            tn(introDivider, 0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, {BackgroundTransparency = 0}):Play()
-            tn(creatorCredit, 0.55, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, {TextTransparency = 0}):Play()
-        end
+    local ringStroke = Instance.new("UIStroke")
+    ringStroke.Thickness = 3
+    ringStroke.Color = WHITE
+    ringStroke.Transparency = 1
+    ringStroke.Parent = ring
+
+    local ringGradient = Instance.new("UIGradient")
+    ringGradient.Color = ColorSequence.new(ACCENT, WHITE)
+    ringGradient.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(0.45, 0.1),
+        NumberSequenceKeypoint.new(0.55, 1),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+    ringGradient.Parent = ringStroke
+
+    local glow = Instance.new("Frame")
+    glow.AnchorPoint = Vector2.new(0.5, 0.5)
+    glow.Position = UDim2.fromScale(0.5, 0.5)
+    glow.Size = UDim2.fromOffset(0, 0)
+    glow.BackgroundColor3 = ACCENT
+    glow.BackgroundTransparency = 1
+    glow.BorderSizePixel = 0
+    glow.ZIndex = 1
+    glow.Parent = bg
+    round(glow)
+
+    local titleHolder = Instance.new("Frame")
+    titleHolder.AnchorPoint = Vector2.new(0.5, 0.5)
+    titleHolder.Position = UDim2.fromScale(0.5, 0.5)
+    titleHolder.Size = UDim2.fromOffset(520, 80)
+    titleHolder.BackgroundTransparency = 1
+    titleHolder.ZIndex = 3
+    titleHolder.Parent = bg
+
+    local layout = Instance.new("UIListLayout")
+    layout.FillDirection = Enum.FillDirection.Horizontal
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.VerticalAlignment = Enum.VerticalAlignment.Center
+    layout.Padding = UDim.new(0, 4)
+    layout.Parent = titleHolder
+
+    local letters = {}
+    local titleText = "PEAK HUB"
+    for i = 1, #titleText do
+        local ch = titleText:sub(i, i)
+        local l = Instance.new("TextLabel")
+        l.BackgroundTransparency = 1
+        l.Text = ch
+        l.Font = Enum.Font.GothamBlack
+        l.TextSize = 64
+        l.TextColor3 = WHITE
+        l.TextTransparency = 1
+        l.Size = (ch == " ") and UDim2.fromOffset(22, 80) or UDim2.fromOffset(0, 80)
+        if ch ~= " " then l.AutomaticSize = Enum.AutomaticSize.X end
+        l.LayoutOrder = i
+        l.ZIndex = 3
+        l.Parent = titleHolder
+        local g = Instance.new("UIGradient")
+        g.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, ACCENT),
+            ColorSequenceKeypoint.new(0.5, WHITE),
+            ColorSequenceKeypoint.new(1, ACCENT),
+        })
+        g.Rotation = 20
+        g.Parent = l
+        table.insert(letters, { label = l, gradient = g })
+    end
+
+    local sub = Instance.new("TextLabel")
+    sub.AnchorPoint = Vector2.new(0.5, 0.5)
+    sub.Position = UDim2.fromScale(0.5, 0.5)
+    sub.Size = UDim2.fromOffset(500, 28)
+    sub.BackgroundTransparency = 1
+    sub.Text = "R E A C H   T H E   T O P"
+    sub.Font = Enum.Font.GothamMedium
+    sub.TextSize = 16
+    sub.TextColor3 = ACCENT:Lerp(WHITE, 0.35)
+    sub.TextTransparency = 1
+    sub.ZIndex = 3
+    sub.Parent = bg
+
+    local pct = Instance.new("TextLabel")
+    pct.AnchorPoint = Vector2.new(0.5, 0.5)
+    pct.Position = UDim2.fromScale(0.5, 0.5)
+    pct.Size = UDim2.fromOffset(200, 24)
+    pct.BackgroundTransparency = 1
+    pct.Text = "0%"
+    pct.Font = Enum.Font.GothamBold
+    pct.TextSize = 18
+    pct.TextColor3 = ACCENT
+    pct.TextTransparency = 1
+    pct.ZIndex = 3
+    pct.Parent = bg
+
+    local skipBtn = Instance.new("TextButton")
+    skipBtn.AnchorPoint = Vector2.new(1, 0)
+    skipBtn.Position = UDim2.new(1, -18, 0, 18)
+    skipBtn.Size = UDim2.fromOffset(88, 36)
+    skipBtn.BackgroundColor3 = Color3.fromRGB(12, 10, 8)
+    skipBtn.BackgroundTransparency = 0.2
+    skipBtn.BorderSizePixel = 0
+    skipBtn.Text = "SKIP"
+    skipBtn.Font = Enum.Font.GothamBold
+    skipBtn.TextSize = 14
+    skipBtn.TextColor3 = WHITE
+    skipBtn.ZIndex = 20
+    skipBtn.AutoButtonColor = false
+    skipBtn.Parent = gui
+    round(skipBtn, UDim.new(0, 8))
+    local skipStroke = Instance.new("UIStroke")
+    skipStroke.Color = ACCENT
+    skipStroke.Thickness = 1.4
+    skipStroke.Transparency = 0.2
+    skipStroke.Parent = skipBtn
+
+    local spin
+    local finishing = false
+
+    local function finishIntro(fast)
+        if finishing or not introActive then return end
+        finishing = true
+        introActive = false
+        running = false
+        if spin then pcall(function() spin:Cancel() end) end
+        local d = fast and 0.35 or 0.55
+        pcall(function()
+            tween(glow, d, { Size = UDim2.fromOffset(1800, 1800), BackgroundTransparency = 0.7 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+            tween(ring, d, { Size = UDim2.fromOffset(1400, 1400) }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+            tween(ringStroke, d, { Transparency = 1 })
+            tween(sub, 0.3, { TextTransparency = 1 })
+            tween(pct, 0.3, { TextTransparency = 1 })
+            tween(skipBtn, 0.25, { TextTransparency = 1, BackgroundTransparency = 1 })
+            for i, entry in ipairs(letters) do
+                task.delay(i * 0.02, function()
+                    if entry.label then
+                        tween(entry.label, 0.4, { TextTransparency = 1, Position = UDim2.fromOffset(0, -24) }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+                    end
+                end)
+            end
+            tween(blur, 0.6, { Size = 0 })
+            tween(bg, 0.7, { BackgroundTransparency = 1 })
+        end)
+        task.delay(d + 0.35, function()
+            pcall(function() if blur then blur:Destroy() end end)
+            pcall(function() if gui then gui:Destroy() end end)
+        end)
+    end
+
+    skipBtn.Activated:Connect(function()
+        finishIntro(true)
     end)
 
-    task.delay(0.25, function()
-        for i, lt in ipairs(titleLetters) do
-            task.delay((i - 1) * 0.03, function()
-                tn(lt, 0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, {TextTransparency = 0}):Play()
+    task.spawn(function()
+        task.wait(0.15)
+        if not introActive then return end
+
+        tween(ring, 1.1, { Size = UDim2.fromOffset(300, 300) }, Enum.EasingStyle.Back)
+        tween(ringStroke, 0.8, { Transparency = 0 })
+        tween(glow, 1.4, { Size = UDim2.fromOffset(420, 420), BackgroundTransparency = 0.88 }, Enum.EasingStyle.Quint)
+
+        spin = Tw:Create(ringGradient, TweenInfo.new(1.4, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Rotation = 360 })
+        spin:Play()
+
+        task.delay(1.4, function()
+            if not introActive then return end
+            local pulse = Tw:Create(glow, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+                Size = UDim2.fromOffset(480, 480),
+                BackgroundTransparency = 0.93,
+            })
+            pulse:Play()
+        end)
+
+        task.wait(0.5)
+        if not introActive then return end
+
+        for i, entry in ipairs(letters) do
+            local l = entry.label
+            l.Position = UDim2.fromOffset(0, 40)
+            task.delay(i * 0.07, function()
+                if not introActive then return end
+                tween(l, 0.7, { TextTransparency = 0, Position = UDim2.fromOffset(0, 0) }, Enum.EasingStyle.Back)
             end)
         end
-    end)
-
-
-    task.delay(3.6, function()
+        task.wait(#letters * 0.07 + 0.5)
         if not introActive then return end
-        for _, lt in ipairs(titleLetters) do
-            tn(lt, 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {TextTransparency = 1}):Play()
+
+        for _, entry in ipairs(letters) do
+            entry.gradient.Offset = Vector2.new(-1, 0)
         end
-        tn(peakTitle, 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {TextTransparency = 1}):Play()
-        tn(introDivider, 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {BackgroundTransparency = 1}):Play()
-        tn(creatorCredit, 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {TextTransparency = 1}):Play()
-    end)
-    task.delay(4.1, function()
-        if not introActive then return end
+        local shineInfo = TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+        for i, entry in ipairs(letters) do
+            task.delay(i * 0.05, function()
+                if not introActive then return end
+                Tw:Create(entry.gradient, shineInfo, { Offset = Vector2.new(1, 0) }):Play()
+            end)
+        end
 
-        giant2.TextSize = 20
-        giant2.TextTransparency = 1
-        tn(giant2, 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, {TextTransparency = 0}):Play()
-        tn(giant2, 0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out, {TextSize = 180}):Play()
-        task.delay(0.55, function()
-            if not introActive then return end
-            tn(giant2, 0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut, {TextSize = 160}):Play()
+        tween(titleHolder, 0.9, { Position = UDim2.fromScale(0.5, 0.42) })
+        task.wait(0.2)
+        if not introActive then return end
+        sub.Position = UDim2.fromScale(0.5, 0.5)
+        tween(sub, 0.8, { TextTransparency = 0.1, Position = UDim2.fromScale(0.5, 0.51) })
+        pct.Position = UDim2.fromScale(0.5, 0.6)
+        tween(pct, 0.6, { TextTransparency = 0 })
+
+        local value = Instance.new("NumberValue")
+        value.Value = 0
+        value.Changed:Connect(function(v)
+            if pct and pct.Parent then pct.Text = math.floor(v) .. "%" end
         end)
-    end)
-
-
-    task.delay(5.2, function()
+        local pctTween = tween(value, 2.6, { Value = 100 }, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+        pctTween.Completed:Wait()
         if not introActive then return end
-        tn(giant2, 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {TextTransparency = 1, TextSize = 220}):Play()
-        tn(bgGrad, 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {BackgroundTransparency = 1}):Play()
-        tn(skipBtn, 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {TextTransparency = 1, BackgroundTransparency = 1}):Play()
-        if introBlur then tn(introBlur, 0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In, {Size = 0}):Play() end
-    end)
-    task.delay(D + 0.5, function()
+        task.wait(0.35)
         if not introActive then return end
-        introActive = false
-        uf()
-        pcall(function() if introBlur then introBlur:Destroy() end end)
-        pcall(function() gui:Destroy() end)
+        finishIntro(false)
     end)
 end
 

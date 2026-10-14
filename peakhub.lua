@@ -91,12 +91,15 @@ Config = {
     StealBarSize = 50,
     UIBackgroundIndex = 1,
     CircleButtons = false,
+    HideButtons = false,
     IntroEnabled = true,
     IntroMusicUrl = "https://files.catbox.moe/sdfi1j.mp3",
     UIBackgroundUrl = "https://files.catbox.moe/sz7icy.png",
     PlayerESP = false,
     PlayerTracers = false,
     RagdollCountdown = false,
+    BrainrotTransparencyBase = false,
+    BrainrotTransparencyHeld = false,
     CustomSky = false,
     CustomSkyTheme = "Night",
     CustomAnim = false,
@@ -423,53 +426,100 @@ applyUIBackground(Config.UIBackgroundUrl or BG_DEFAULT_URL)
 
 uiScaleObj = Instance.new("UIScale")
 deviceScaleFactor = 1
-function refreshDeviceLayout()
+MAIN_UI_WIDTH = 340
+MAIN_UI_HEIGHT = 545
+
+function getViewportSize()
     local cam = workspace.CurrentCamera
-    local viewport = cam and cam.ViewportSize or Vector2.new(1280, 720)
-    local shortSide = math.min(viewport.X, viewport.Y)
-    if UserInputService.TouchEnabled and shortSide < 500 then
-        deviceScaleFactor = 0.76
-    elseif UserInputService.TouchEnabled and shortSide >= 600 then
-        deviceScaleFactor = 0.95
-    elseif UserInputService.TouchEnabled then
-        deviceScaleFactor = 0.84
-    else
-        deviceScaleFactor = 0.96
+    return cam and cam.ViewportSize or Vector2.new(1280, 720)
+end
+
+function getMaxFitScale()
+    local viewport = getViewportSize()
+    if not UserInputService.TouchEnabled then
+        return 2
     end
-    local base = math.clamp((tonumber(Config.UIScale) or 40) / 50, 0.2, 2)
-    uiScaleObj.Scale = base * deviceScaleFactor
-    if not _G.PeakHubMainWasDragged then
-        main.AnchorPoint = Vector2.new(0.5, 0.5)
-        main.Position = UDim2.new(0.143, 0, 0.436, 0)
+    local maxH = viewport.Y * 0.88
+    local maxW = viewport.X * 0.92
+    local fit = math.min(maxH / MAIN_UI_HEIGHT, maxW / MAIN_UI_WIDTH)
+    if viewport.Y < 520 then
+        fit = fit * 0.94
+    elseif viewport.Y < 700 then
+        fit = fit * 0.97
+    end
+    return math.clamp(fit, 0.28, 1.2)
+end
+
+function getUserBaseScale()
+    return math.clamp((tonumber(Config.UIScale) or 40) / 50, 0.2, 2)
+end
+
+function getEffectiveUIScale()
+    local base = getUserBaseScale()
+    if not UserInputService.TouchEnabled then
+        return base * 0.96
+    end
+    return math.clamp(math.min(base, getMaxFitScale()), 0.28, 1.2)
+end
+
+function getFitScaleForViewport(base)
+    base = math.clamp(tonumber(base) or getUserBaseScale(), 0.15, 2)
+    if not UserInputService.TouchEnabled then
+        return base * 0.96
+    end
+    return math.clamp(math.min(base, getMaxFitScale()), 0.28, 1.2)
+end
+
+function refreshDeviceLayout(forcePosition)
+    deviceScaleFactor = 1
+    if uiScaleObj then
+        uiScaleObj.Scale = getEffectiveUIScale()
+    end
+    if forcePosition or not _G.PeakHubMainWasDragged then
+        if UserInputService.TouchEnabled then
+            main.AnchorPoint = Vector2.new(0, 0.5)
+            main.Position = UDim2.new(0, 6, 0.5, 0)
+        else
+            main.AnchorPoint = Vector2.new(0.5, 0.5)
+            main.Position = UDim2.new(0.143, 0, 0.436, 0)
+        end
     end
 end
 uiScaleObj.Scale = 0.88
 uiScaleObj.Parent = main
-refreshDeviceLayout()
+refreshDeviceLayout(true)
 if workspace.CurrentCamera then
-    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refreshDeviceLayout)
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+        if uiScaleObj then
+            uiScaleObj.Scale = getEffectiveUIScale()
+        end
+    end)
 end
 
 function getTargetUIScale()
-    return math.clamp((tonumber(Config.UIScale) or 40) / 50, 0.2, 2)
+    return getUserBaseScale()
 end
 
 function applyUIScale(val)
     Config.UIScale = math.clamp(tonumber(val) or 40, 10, 100)
-    local target = getTargetUIScale() * deviceScaleFactor
-    TweenService:Create(uiScaleObj, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Scale = target
-    }):Play()
+    local target = getEffectiveUIScale()
+    if uiScaleObj then
+        TweenService:Create(uiScaleObj, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Scale = target
+        }):Play()
+    end
+    pcall(saveConfig)
 end
 
 
 task.defer(function()
-    local target = getTargetUIScale() * deviceScaleFactor
-
+    local target = getEffectiveUIScale()
     main.BackgroundTransparency = 1
-    TweenService:Create(uiScaleObj, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Scale = target
-    }):Play()
+    if uiScaleObj then
+        TweenService:Create(uiScaleObj, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Scale = target
+        }):Play()
+    end
 end)
 
 
@@ -566,7 +616,8 @@ miniStartPos = nil
 function showMiniOnly()
     uiMinimized = true
     Config.HideUI = true
-    local curScale = uiScaleObj and uiScaleObj.Scale or 1
+    local targetScale = getEffectiveUIScale()
+    local curScale = uiScaleObj and uiScaleObj.Scale or targetScale
     if uiScaleObj then
         TweenService:Create(uiScaleObj, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
             Scale = curScale * 0.92
@@ -579,7 +630,7 @@ function showMiniOnly()
         main.Visible = false
         main.BackgroundTransparency = 1
         if uiScaleObj then
-            uiScaleObj.Scale = math.clamp((tonumber(Config.UIScale) or 40) / 50, 0.2, 2)
+            uiScaleObj.Scale = targetScale
         end
         miniRestoreButton.Visible = true
         miniRestoreButton.BackgroundTransparency = 1
@@ -587,6 +638,7 @@ function showMiniOnly()
             BackgroundTransparency = 0.05,
         }):Play()
     end)
+    pcall(saveConfig)
 end
 
 function restoreFromMini()
@@ -594,9 +646,9 @@ function restoreFromMini()
     Config.HideUI = false
     miniRestoreButton.Visible = false
     main.Visible = true
-    main.Size = UDim2.new(0, 340, 0, 545)
+    main.Size = UDim2.new(0, MAIN_UI_WIDTH or 340, 0, MAIN_UI_HEIGHT or 545)
     main.BackgroundTransparency = 1
-    local targetScale = math.clamp((tonumber(Config.UIScale) or 40) / 50, 0.2, 2)
+    local targetScale = getEffectiveUIScale()
     if uiScaleObj then
         uiScaleObj.Scale = targetScale * 0.9
         TweenService:Create(uiScaleObj, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
@@ -604,7 +656,7 @@ function restoreFromMini()
         }):Play()
     end
     main.BackgroundTransparency = 1
-    saveConfig()
+    pcall(saveConfig)
 end
 
 minimizeButton.Activated:Connect(function()
@@ -1516,299 +1568,238 @@ combat = makePage("Combat")
 
 VyzeSpeed = {}
 do
-    local function __vyzeMakeSpeedEngine()
-        local MOVE_KEYS = {
-            [Enum.KeyCode.W] = true, [Enum.KeyCode.A] = true,
-            [Enum.KeyCode.S] = true, [Enum.KeyCode.D] = true,
-            [Enum.KeyCode.Up] = true, [Enum.KeyCode.Left] = true,
-            [Enum.KeyCode.Down] = true, [Enum.KeyCode.Right] = true,
-        }
+    local MOVE_KEYS = {
+        [Enum.KeyCode.W] = true, [Enum.KeyCode.A] = true,
+        [Enum.KeyCode.S] = true, [Enum.KeyCode.D] = true,
+        [Enum.KeyCode.Up] = true, [Enum.KeyCode.Left] = true,
+        [Enum.KeyCode.Down] = true, [Enum.KeyCode.Right] = true,
+    }
 
-        local function isRagdollState(hum)
-            if not hum then return true end
-            local st = hum:GetState()
-            return hum.PlatformStand == true
-                or st == Enum.HumanoidStateType.Physics
-                or st == Enum.HumanoidStateType.Ragdoll
-                or st == Enum.HumanoidStateType.FallingDown
-        end
+    local S = {
+        lastMoveDir = Vector3.zero,
+        currentPlane = Vector2.zero,
+        spoofed = Vector3.zero,
+        root = nil,
+        hooked = false,
+    }
 
-        local S = {
-            linVel = nil, att0 = nil, att1 = nil, char = nil,
-            spoofed = Vector3.zero,
-            lastMoveDir = Vector3.zero,
-            currentPlane = Vector2.zero,
-            lastApplyAt = tick(),
-        }
-
-        local function destroyLinVel()
-            if S.linVel then pcall(function() S.linVel:Destroy() end) end
-            if S.att0 then pcall(function() S.att0:Destroy() end) end
-            if S.att1 then pcall(function() S.att1:Destroy() end) end
-            S.linVel, S.att0, S.att1, S.char = nil, nil, nil, nil
-            S.currentPlane = Vector2.zero
-            S.lastApplyAt = tick()
-        end
-
-        local function setupLV(char)
-            destroyLinVel()
-            if not char then return end
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if not hrp then
-                local ok, res = pcall(function() return char:WaitForChild("HumanoidRootPart", 5) end)
-                if ok then hrp = res end
-            end
-            if not hrp then return end
-
-            local att0 = Instance.new("Attachment")
-            att0.Name = "PeakHubSpeedAttachment"
-            att0.Parent = hrp
-
-            local lv = Instance.new("LinearVelocity")
-            lv.Name = "PeakHubSpeedVelocity"
-            lv.Attachment0 = att0
-            lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
-            lv.PrimaryTangentAxis = Vector3.new(1, 0, 0)
-            lv.SecondaryTangentAxis = Vector3.new(0, 0, 1)
-            lv.RelativeTo = Enum.ActuatorRelativeTo.World
-            lv.MaxForce = 100000
-            lv.PlaneVelocity = Vector2.zero
-            lv.Enabled = true
-            lv.Parent = hrp
-
-            S.linVel, S.att0, S.att1, S.char = lv, att0, nil, char
-            pcall(function() hrp:SetNetworkOwner(LP) end)
-        end
-
-
-        local WALL_FLING_CAST = 3.0
-        local WALL_FLING_GAP = 0.3
-
-        local function antiWallFling(root, maxSpd)
-            if not root or not root.Parent then return end
-            maxSpd = tonumber(maxSpd) or 0
-            pcall(function()
-                local v = root.AssemblyLinearVelocity
-                local horiz = Vector3.new(v.X, 0, v.Z)
-                local moving = horiz.Magnitude > 1
-                local dir = moving and horiz.Unit or root.CFrame.LookVector
-                dir = Vector3.new(dir.X, 0, dir.Z)
-                if dir.Magnitude < 0.01 then return end
-                dir = dir.Unit
-
-                local params = RaycastParams.new()
-                params.FilterType = Enum.RaycastFilterType.Exclude
-                params.FilterDescendantsInstances = { LP.Character }
-                params.IgnoreWater = true
-
-                local hit = workspace:Raycast(root.Position, dir * WALL_FLING_CAST, params)
-                local nearWall = hit and hit.Instance and hit.Instance.CanCollide
-                    and hit.Distance <= (1.8 + WALL_FLING_GAP)
-
-                if not nearWall then return end
-
-
-                if maxSpd > 0 and horiz.Magnitude > maxSpd + 1 then
-                    local flat = horiz.Unit * maxSpd
-                    v = Vector3.new(flat.X, v.Y, flat.Z)
-                end
-
-                local jumpHeld = UserInputService:IsKeyDown(Enum.KeyCode.Space)
-                if not jumpHeld and v.Y > 45 then
-                    v = Vector3.new(v.X, 0, v.Z)
-                end
-                root.AssemblyLinearVelocity = v
-            end)
-        end
-
-        local function setXZ(x, z)
-            S.currentPlane = Vector2.new(x or 0, z or 0)
-            if S.linVel and S.linVel.Parent then
-                pcall(function() S.linVel.PlaneVelocity = S.currentPlane end)
-            end
-        end
-
-
-
-        local function getPlane()
-            return S.currentPlane
-        end
-
-        local function clear()
-            S.currentPlane = Vector2.zero
-            S.lastApplyAt = tick()
-            if S.linVel and S.linVel.Parent then
-                pcall(function() S.linVel.PlaneVelocity = Vector2.zero end)
-            end
-        end
-
-        local function ensure()
-            local char = LP.Character
-            if not char then return false end
-            if S.linVel and S.linVel.Parent and S.char == char then
-                return true
-            end
-            setupLV(char)
-            return S.linVel ~= nil and S.linVel.Parent ~= nil
-        end
-
-        local function speedLVSet(hrp, x, z)
-            ensure()
-            setXZ(x or 0, z or 0)
-            if hrp then
-                local mag = math.sqrt((x or 0) * (x or 0) + (z or 0) * (z or 0))
-                antiWallFling(hrp, mag)
-            end
-        end
-
-        local function speedLVClear(hrp)
-            clear()
-        end
-
-        local wallParams = RaycastParams.new()
-        wallParams.FilterType = Enum.RaycastFilterType.Exclude
-        wallParams.IgnoreWater = true
-        local lastFilterUpdate = 0
-        local blockedTime = 0
-
-        local function applySpeed(speed)
-            local now = tick()
-            local dt = math.clamp(now - (S.lastApplyAt or now), 0, 0.05)
-            S.lastApplyAt = now
-
-            local char = LP.Character
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if not char or not hum or not root or hum.Health <= 0 then return end
-
-            if isRagdollState(hum) then
-                S.lastMoveDir = Vector3.zero
-                clear()
-                if S.linVel then S.linVel.Enabled = false end
-                return
-            end
-
-            ensure()
-            local lv = S.linVel
-            if not lv then return end
-            if not lv.Enabled then lv.Enabled = true end
-
-            local md = hum.MoveDirection
-            local moving = md.Magnitude > 0.1
-            local flatDir = moving and Vector3.new(md.X, 0, md.Z) or Vector3.zero
-            if flatDir.Magnitude > 0.001 then flatDir = flatDir.Unit end
-
-            local wallNormal = nil
-
-
-            local grounded = hum.FloorMaterial ~= Enum.Material.Air
-            if moving and grounded then
-                local now = tick()
-                if now - lastFilterUpdate > 1 then
-                    lastFilterUpdate = now
-                    local filter = {char}
-                    for _, p in ipairs(Players:GetPlayers()) do
-                        if p.Character then table.insert(filter, p.Character) end
-                    end
-                    wallParams.FilterDescendantsInstances = filter
-                end
-                local hit = workspace:Raycast(root.Position + Vector3.new(0, 1, 0), flatDir * 2.5, wallParams)
-                if hit and hit.Instance and hit.Instance.CanCollide then
-                    local n = Vector3.new(hit.Normal.X, 0, hit.Normal.Z)
-                    if n.Magnitude > 0.7 then wallNormal = n.Unit end
-                end
-            end
-
-            local vel = root.AssemblyLinearVelocity
-            local horizontal = Vector3.new(vel.X, 0, vel.Z)
-            local blocked = wallNormal ~= nil or (moving and horizontal.Magnitude < 2)
-
-            local targetPlane = Vector2.zero
-            if moving then
-                local wanted = flatDir * (tonumber(speed) or 0)
-                if wallNormal then
-                    wanted = wanted - wallNormal * wanted:Dot(wallNormal)
-                end
-                if wanted.Magnitude >= 0.5 then
-                    targetPlane = Vector2.new(wanted.X, wanted.Z)
-                end
-                S.lastMoveDir = flatDir
-            else
-                S.lastMoveDir = Vector3.zero
-            end
-
-
-
-
-            local response = grounded and 18 or 10
-            local alpha = 1 - math.exp(-response * dt)
-            S.currentPlane = S.currentPlane:Lerp(targetPlane, alpha)
-            if S.currentPlane.Magnitude < 0.25 and targetPlane.Magnitude == 0 then
-                S.currentPlane = Vector2.zero
-            end
-            lv.PlaneVelocity = S.currentPlane
-
-            if grounded and blocked then blockedTime = blockedTime + dt else blockedTime = 0 end
-
-            lv.MaxForce = grounded and (blockedTime > 0.35 and 25000 or 100000) or 50000
-        end
-
-
-        pcall(function()
-            if not (getrawmetatable and setreadonly and newcclosure) then return end
-            local mt = getrawmetatable(game)
-            setreadonly(mt, false)
-            local oldIndex = mt.__index
-            mt.__index = newcclosure(function(self, key)
-                if key == "AssemblyLinearVelocity" or key == "Velocity" then
-                    if typeof(self) == "Instance" and self:IsA("BasePart")
-                        and self.Name == "HumanoidRootPart"
-                        and LP.Character and self:IsDescendantOf(LP.Character) then
-                        return S.spoofed
-                    end
-                end
-                return oldIndex(self, key)
-            end)
-            setreadonly(mt, true)
-        end)
-
-        RunService.Heartbeat:Connect(function()
-            S.spoofed = Vector3.zero
-        end)
-
-        LP.CharacterAdded:Connect(function(char)
-            task.wait(0.5)
-            pcall(setupLV, char)
-            S.lastMoveDir = Vector3.zero
-        end)
-
-        task.defer(function()
-            if LP.Character then
-                task.wait(0.3)
-                pcall(setupLV, LP.Character)
-            end
-        end)
-
-        return {
-            apply = applySpeed,
-            set = speedLVSet,
-            clear = speedLVClear,
-            setup = setupLV,
-            ensure = ensure,
-            clearVel = clear,
-            setXZ = setXZ,
-            getPlane = getPlane,
-        }
+    local function _V3new(x, y, z)
+        return Vector3.new(x, y, z)
     end
 
-    local eng = __vyzeMakeSpeedEngine()
-    VyzeSpeed.apply = eng.apply
-    VyzeSpeed.set = eng.set
-    VyzeSpeed.clear = eng.clear
-    VyzeSpeed.setup = eng.setup
-    VyzeSpeed.ensure = eng.ensure
-    VyzeSpeed.setXZ = eng.setXZ
-    VyzeSpeed.getPlane = eng.getPlane
+    local function isRagdollState(hum)
+        if not hum then return true end
+        local st = hum:GetState()
+        return hum.PlatformStand == true
+            or st == Enum.HumanoidStateType.Physics
+            or st == Enum.HumanoidStateType.Ragdoll
+            or st == Enum.HumanoidStateType.FallingDown
+    end
+
+    local function destroyLinVel()
+        local char = LP.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        for _, child in ipairs(hrp:GetChildren()) do
+            if child.Name == "PeakHubSpeedVelocity" or child.Name == "PeakHubSpeedAttachment" then
+                pcall(function() child:Destroy() end)
+            end
+        end
+    end
+
+    local function setupLV(char)
+        destroyLinVel()
+        if not char then S.root = nil; return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            local ok, res = pcall(function() return char:WaitForChild("HumanoidRootPart", 5) end)
+            if ok then hrp = res end
+        end
+        S.root = hrp
+        S.lastMoveDir = Vector3.zero
+        S.currentPlane = Vector2.zero
+        S.spoofed = Vector3.zero
+    end
+
+    local function ensure()
+        local char = LP.Character
+        if not char then return false end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return false end
+        S.root = hrp
+        return true
+    end
+
+    local function applyXZ(hrp, x, z)
+        if not hrp or not hrp.Parent then return end
+        local y = hrp.AssemblyLinearVelocity.Y
+        local sx, sz = tonumber(x) or 0, tonumber(z) or 0
+        hrp.AssemblyLinearVelocity = _V3new(sx, y, sz)
+        local vis = math.min(math.sqrt(sx * sx + sz * sz), 20)
+        if vis > 0.05 then
+            local u = Vector3.new(sx, 0, sz)
+            if u.Magnitude > 0.001 then u = u.Unit end
+            S.spoofed = _V3new(u.X * vis, y, u.Z * vis)
+        else
+            S.spoofed = _V3new(0, y, 0)
+        end
+        S.currentPlane = Vector2.new(sx, sz)
+    end
+
+    local function setXZ(x, z)
+        ensure()
+        local hrp = S.root or (LP.Character and LP.Character:FindFirstChild("HumanoidRootPart"))
+        applyXZ(hrp, x, z)
+    end
+
+    local function getPlane()
+        return S.currentPlane
+    end
+
+    local function clear()
+        S.currentPlane = Vector2.zero
+        S.lastMoveDir = Vector3.zero
+        local hrp = S.root or (LP.Character and LP.Character:FindFirstChild("HumanoidRootPart"))
+        if hrp and hrp.Parent then
+            local y = hrp.AssemblyLinearVelocity.Y
+            hrp.AssemblyLinearVelocity = _V3new(0, y, 0)
+            S.spoofed = _V3new(0, y, 0)
+        else
+            S.spoofed = Vector3.zero
+        end
+    end
+
+    local function speedLVSet(hrp, x, z)
+        if hrp then S.root = hrp end
+        applyXZ(hrp or S.root, x, z)
+    end
+
+    local function speedLVClear(hrp)
+        if hrp then S.root = hrp end
+        clear()
+    end
+
+    local function applyVelocityToHRP(dir, speed, hrp)
+        if not hrp or not hrp.Parent then return end
+        if State and State.autoBatToggled then return end
+        if type(speed) ~= "number" or speed ~= speed or speed <= 0 or speed == math.huge then return end
+
+        local verticalVelocity = hrp.AssemblyLinearVelocity.Y
+        if _G._ZurichHub_MovementBlocked == true or _G._CrystalHub_MovementBlocked == true then
+            hrp.AssemblyLinearVelocity = _V3new(0, math.min(verticalVelocity, 0), 0)
+            return
+        end
+
+        if dir and dir.Magnitude > 0.05 then
+            pcall(function()
+                if hrp.SetNetworkOwner then hrp:SetNetworkOwner(LP) end
+            end)
+            local unit = dir.Unit
+            hrp.AssemblyLinearVelocity = _V3new(unit.X * speed, verticalVelocity, unit.Z * speed)
+            local visibleSpeed = math.min(speed, 20)
+            S.spoofed = _V3new(unit.X * visibleSpeed, verticalVelocity, unit.Z * visibleSpeed)
+            S.currentPlane = Vector2.new(unit.X * speed, unit.Z * speed)
+            S.lastMoveDir = unit
+        else
+            S.spoofed = _V3new(0, verticalVelocity, 0)
+            S.currentPlane = Vector2.zero
+            hrp.AssemblyLinearVelocity = _V3new(0, verticalVelocity, 0)
+        end
+    end
+
+    local function applySpeed(speed)
+        local char = LP.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not hum or not root or hum.Health <= 0 then return end
+        if State and State.autoBatToggled then return end
+        if Config.AutoLeft or Config.AutoRight then return end
+        if isRagdollState(hum) then
+            S.lastMoveDir = Vector3.zero
+            return
+        end
+
+        S.root = root
+        local direction
+        if hum.MoveDirection.Magnitude > 0 then
+            S.lastMoveDir = hum.MoveDirection
+            direction = hum.MoveDirection
+        elseif S.lastMoveDir.Magnitude > 0 then
+            for key in pairs(MOVE_KEYS) do
+                if UserInputService:IsKeyDown(key) then
+                    direction = S.lastMoveDir
+                    break
+                end
+            end
+        end
+        applyVelocityToHRP(direction, tonumber(speed) or 16, root)
+    end
+
+    pcall(function()
+        if not (getrawmetatable and setreadonly and newcclosure and checkcaller) then return end
+        if S.hooked then return end
+        local mt = getrawmetatable(game)
+        if not mt then return end
+        setreadonly(mt, false)
+        local oldIndex = mt.__index
+        local oldNewIndex = mt.__newindex
+        local function isOurRoot(t, k)
+            local tk = tostring(k)
+            if tk ~= "AssemblyLinearVelocity" and tk ~= "Velocity" then return false end
+            if typeof(t) ~= "Instance" or not t:IsA("BasePart") then return false end
+            local tn = t.Name
+            if tn ~= "HumanoidRootPart" and tn ~= "Torso" and tn ~= "UpperTorso" then return false end
+            local char = LP.Character
+            return char ~= nil and t:IsDescendantOf(char)
+        end
+        if type(oldIndex) == "function" or type(oldIndex) == "table" then
+            mt.__index = newcclosure(function(self, key)
+                if not checkcaller() then
+                    local good, mine = pcall(isOurRoot, self, key)
+                    if good and mine then return S.spoofed end
+                end
+                if type(oldIndex) == "function" then return oldIndex(self, key) end
+                return oldIndex[key]
+            end)
+        end
+        if type(oldNewIndex) == "function" then
+            mt.__newindex = newcclosure(function(self, key, value)
+                if not checkcaller() then
+                    local good, mine = pcall(isOurRoot, self, key)
+                    if good and mine then
+                        S.spoofed = value
+                        return
+                    end
+                end
+                return oldNewIndex(self, key, value)
+            end)
+        end
+        setreadonly(mt, true)
+        S.hooked = true
+    end)
+
+    LP.CharacterAdded:Connect(function(char)
+        task.wait(0.5)
+        pcall(setupLV, char)
+        S.lastMoveDir = Vector3.zero
+    end)
+
+    task.defer(function()
+        if LP.Character then
+            task.wait(0.3)
+            pcall(setupLV, LP.Character)
+        end
+    end)
+
+    VyzeSpeed.apply = applySpeed
+    VyzeSpeed.set = speedLVSet
+    VyzeSpeed.clear = speedLVClear
+    VyzeSpeed.setup = setupLV
+    VyzeSpeed.ensure = ensure
+    VyzeSpeed.setXZ = setXZ
+    VyzeSpeed.getPlane = getPlane
 end
 
 function applyVelocitySpeed(...)
@@ -2390,7 +2381,6 @@ antiRagdollRow, setAntiRagdollVisual = toggleRow(misc, "Anti Ragdoll", Config.An
     end
 end)
 
--- Selettore V1/V2 compatto accanto al toggle Anti Ragdoll.
 antiRagModeButtons = {}
 function setAntiRagdollMode(mode)
     mode = mode == "V2" and "V2" or "V1"
@@ -2432,6 +2422,18 @@ for index, mode in ipairs({"V1", "V2"}) do
     antiRagModeButtons[mode] = button
 end
 setAntiRagdollMode(Config.AntiRagdollMode or "V1")
+
+toggleRow(misc, "Ragdoll Countdown", Config.RagdollCountdown, function(state)
+    Config.RagdollCountdown = state
+    if state then
+        if type(hookRagdollCountdown) == "function" and LP.Character then
+            pcall(hookRagdollCountdown, LP.Character)
+        end
+    else
+        if type(stopRagdollCountdown) == "function" then pcall(stopRagdollCountdown) end
+    end
+    saveConfig()
+end)
 
 sectionLabel(misc, "COUNTERS")
 toggleRow(misc, "Bat Counter", Config.BatCounter, function(state)
@@ -2727,10 +2729,62 @@ end
 PEAK_BAT_SKIN_CONNECTIONS = setmetatable({}, {__mode = "k"})
 PEAK_BAT_SKIN_SOUNDS = {
     Katana = "rbxassetid://111808555599832",
-    Scythe = "rbxassetid://137964779511233",
-    ["Ban Hammer"] = "rbxassetid://111808555599832",
     ["Minecraft Sword"] = "rbxassetid://12222216",
 }
+
+peakSwingSoundLastAt = 0
+
+function peakMuteDefaultSlash(tool)
+    if not tool then return end
+    local slash = tool:FindFirstChild("Slash")
+    if slash and slash:IsA("Sound") then
+        slash.Volume = 0
+        slash.Playing = false
+    end
+end
+
+function peakEnsureSwingSound(tool, soundId)
+    if not tool or not soundId then return nil end
+    local handle = tool:FindFirstChild("Handle") or tool
+    local s = tool:FindFirstChild("PeakHubSwingSound") or (handle and handle:FindFirstChild("PeakHubSwingSound"))
+    if not s then
+        s = Instance.new("Sound")
+        s.Name = "PeakHubSwingSound"
+        s.Volume = 1
+        s.RollOffMode = Enum.RollOffMode.InverseTapered
+        s.Parent = handle or tool
+    end
+    if s.SoundId ~= soundId then
+        s.SoundId = soundId
+    end
+    return s
+end
+
+function peakPlaySwingSound(tool, skin)
+    skin = skin or Config.BatSkin
+    local soundId = PEAK_BAT_SKIN_SOUNDS[skin]
+    if not soundId or not tool then return end
+    peakMuteDefaultSlash(tool)
+    local now = tick()
+    local cooldown = (skin == "Minecraft Sword") and 0.1 or 0.2
+    if now - peakSwingSoundLastAt < cooldown then return end
+    peakSwingSoundLastAt = now
+    local s = peakEnsureSwingSound(tool, soundId)
+    if not s then return end
+    pcall(function()
+        s:Stop()
+        if skin == "Minecraft Sword" then
+            s.PlaybackSpeed = 1.45
+            s.TimePosition = 0
+            s.Volume = 1
+        else
+            s.PlaybackSpeed = 1
+            s.TimePosition = 0
+            s.Volume = 0.95
+        end
+        s:Play()
+    end)
+end
 
 function peakSetupBatSkinEffects(tool, skin, folder)
     if not tool or not folder or not folder.Parent then return end
@@ -2774,6 +2828,11 @@ function peakSetupBatSkinEffects(tool, skin, folder)
         trail.Parent = folder
     end
 
+    if PEAK_BAT_SKIN_SOUNDS[skin] then
+        peakMuteDefaultSlash(tool)
+        peakEnsureSwingSound(tool, PEAK_BAT_SKIN_SOUNDS[skin])
+    end
+
     PEAK_BAT_SKIN_CONNECTIONS[tool] = tool.Activated:Connect(function()
         if not tool.Parent or Config.BatSkin ~= skin then return end
         local trail = folder:FindFirstChild("PeakBatSwingTrail", true)
@@ -2783,11 +2842,15 @@ function peakSetupBatSkinEffects(tool, skin, folder)
                 if trail and trail.Parent then trail.Enabled = false end
             end)
         end
+        if PEAK_BAT_SKIN_SOUNDS[Config.BatSkin] then
+            peakPlaySwingSound(tool, Config.BatSkin)
+        end
     end)
 end
 
 function peakApplyBatSkin(tool)
     if not peakIsBatTool(tool) then return end
+    if Config.BatSkin == "Scythe" or Config.BatSkin == "Ban Hammer" then Config.BatSkin = "Katana" end
     local skin = Config.BatSkin or "Katana"
     if PEAK_BAT_SKIN_CONNECTIONS[tool] then
         pcall(function() PEAK_BAT_SKIN_CONNECTIONS[tool]:Disconnect() end)
@@ -2974,27 +3037,49 @@ task.defer(function()
     pcall(applyPeakBatSkinToAll)
 end)
 
+task.spawn(function()
+    while true do
+        pcall(function()
+            local skin = Config.BatSkin
+            local soundId = PEAK_BAT_SKIN_SOUNDS[skin]
+            if not soundId then return end
+            local containers = {LP.Character, LP:FindFirstChildOfClass("Backpack")}
+            for _, container in ipairs(containers) do
+                if container then
+                    for _, tool in ipairs(container:GetChildren()) do
+                        if peakIsBatTool(tool) then
+                            peakMuteDefaultSlash(tool)
+                            peakEnsureSwingSound(tool, soundId)
+                        end
+                    end
+                end
+            end
+        end)
+        task.wait(0.5)
+    end
+end)
+
 visual = makePage("Visual")
 
 
 sectionLabel(visual, "ESP")
 toggleRow(visual, "ESP", Config.PlayerESP, function(state)
     Config.PlayerESP = state
-    if state then startPlayerEsp() else stopPlayerEsp() end
-end)
-toggleRow(visual, "Tracers", Config.PlayerTracers, function(state)
     Config.PlayerTracers = state
-    if state then startPlayerTracers() else stopPlayerTracers() end
-end)
-toggleRow(visual, "Ragdoll Countdown", Config.RagdollCountdown, function(state)
-    Config.RagdollCountdown = state
     if state then
-        if type(hookRagdollCountdown) == "function" and LP.Character then
-            pcall(hookRagdollCountdown, LP.Character)
-        end
+        if startPlayerEsp then startPlayerEsp() end
+        if startPlayerTracers then startPlayerTracers() end
     else
-        if type(stopRagdollCountdown) == "function" then pcall(stopRagdollCountdown) end
+        if stopPlayerEsp then stopPlayerEsp() end
+        if stopPlayerTracers then stopPlayerTracers() end
     end
+end)
+toggleRow(visual, "Transparency Base", Config.BrainrotTransparencyBase, function(state)
+    Config.BrainrotTransparencyBase = state
+    if _G.RHBrainrotTransparency then
+        pcall(_G.RHBrainrotTransparency.SetBase, state)
+    end
+    saveConfig()
 end)
 
 
@@ -3011,8 +3096,6 @@ toggleRow(visual, "Custom Animation", Config.CustomAnim, function(state)
         if state then
             Config.Unwalk = false
             if type(stopUnwalk) == "function" then pcall(stopUnwalk) end
-            -- Animate can be rebuilt a moment after the toggle is clicked. Retry
-            -- after its initialization so the ON state and actual animation IDs stay in sync.
             task.spawn(function()
                 for _, delayTime in ipairs({0, 0.25, 0.75, 1.25}) do
                     if delayTime > 0 then task.wait(delayTime) end
@@ -3052,7 +3135,7 @@ cycleSelectorRow(visual, "Anim Pack", {"Unwalk","Adidas Sports","Adidas Communit
     end
     saveConfig()
 end)
-cycleSelectorRow(visual, "Bat Skin", {"Katana", "Minecraft Sword", "Scythe", "Ban Hammer", "None"}, Config.BatSkin, function(skin)
+cycleSelectorRow(visual, "Bat Skin", {"Katana", "Minecraft Sword", "None"}, Config.BatSkin, function(skin)
     Config.BatSkin = skin
     if applyPeakBatSkinToAll then
         task.spawn(function() pcall(applyPeakBatSkinToAll) end)
@@ -3101,8 +3184,6 @@ end)
 do
 sectionLabel(visual, "HEADLESS & KORBLOX")
 
--- Visual-only appearance toggles adapted from the supplied reference.
--- Original character parts are preserved and restored when toggled off.
 peakAppearanceState = {
     headless = setmetatable({}, {__mode = "k"}),
     korblox = setmetatable({}, {__mode = "k"}),
@@ -3789,6 +3870,12 @@ do
     end)
 end
 
+toggleRow(settings, "Hide Buttons", Config.HideButtons, function(state)
+    Config.HideButtons = state
+    if _G.PeakHubApplyHideButtons then pcall(_G.PeakHubApplyHideButtons, state) end
+    saveConfig()
+end)
+
 toggleRow(settings, "Circle Buttons", Config.CircleButtons, function(state)
     Config.CircleButtons = state
     if _G.VyzeApplyMobileButtonShape then pcall(_G.VyzeApplyMobileButtonShape) end
@@ -3875,6 +3962,8 @@ do
         Config.PlayerESP = false
         Config.PlayerTracers = false
         Config.RagdollCountdown = false
+        Config.BrainrotTransparencyBase = false
+        Config.BrainrotTransparencyHeld = false
         Config.CustomAnim = false
         Config.AntiLag = false
         Config.StretchRes = false
@@ -3889,6 +3978,7 @@ do
         miniRestoreButton.Visible = false
         Config.MobileButtonSize = 50
         Config.CircleButtons = false
+        Config.HideButtons = false
         Config.IntroEnabled = true
         applyUIScale(40)
         main.Active = true
@@ -3998,6 +4088,9 @@ function tryBatSwing()
             if bat then pcall(function() hum:EquipTool(bat) end) end
         end
         if bat and bat:IsA("Tool") and (bat.Name:lower():find("bat",1,true) or bat.Name:lower():find("slap",1,true)) then
+            if PEAK_BAT_SKIN_SOUNDS[Config.BatSkin] then
+                peakPlaySwingSound(bat, Config.BatSkin)
+            end
             bat:Activate()
         end
     end)
@@ -4026,18 +4119,116 @@ startBatAimbot=function()
     table.clear(mirrorTPPreviousY)
     if syncAutoAntiDie then pcall(syncAutoAntiDie) end
 
+    local HEIGHT=4.75
+    local VERT_OFFSET=1
+    local HIT_DIST=9
+    local lockedChar=nil
+    local noTargetSince=nil
+    local swingCooldown=false
+
+    local Bypass={
+        VelocityCap=95,
+        TeleportThreshold=8,
+        LastTargetPos=nil,
+        LastTargetAt=nil,
+        StableVelocity=Vector3.zero,
+        MaxAccelPerSec=140,
+        MaxPredictOffset=8,
+    }
+
+    local function bypassReset()
+        Bypass.LastTargetPos=nil
+        Bypass.LastTargetAt=nil
+        Bypass.StableVelocity=Vector3.zero
+    end
+
+    local function bypassGetStableVelocity(tHRP, now)
+        local raw=tHRP.AssemblyLinearVelocity
+        if raw.Magnitude>Bypass.VelocityCap then
+            raw=raw.Unit*Bypass.VelocityCap
+        end
+        local prev=Bypass.StableVelocity
+        local dt=math.max((Bypass.LastTargetAt and (now-Bypass.LastTargetAt)) or 0.016, 0.008)
+        local accel=(raw-prev)/dt
+        if accel.Magnitude>Bypass.MaxAccelPerSec then
+            accel=accel.Unit*Bypass.MaxAccelPerSec
+        end
+        local stable=prev+accel*dt
+        Bypass.StableVelocity=stable
+        return stable
+    end
+
+    local function bypassIsTeleport(tHRP, now)
+        local pos=tHRP.Position
+        if Bypass.LastTargetPos and Bypass.LastTargetAt then
+            local dt=now-Bypass.LastTargetAt
+            if dt>0 and dt<0.5 then
+                local jump=(pos-Bypass.LastTargetPos).Magnitude
+                if jump>(Bypass.TeleportThreshold+Bypass.VelocityCap*dt) then
+                    Bypass.LastTargetPos=pos
+                    Bypass.LastTargetAt=now
+                    return true
+                end
+            end
+        end
+        Bypass.LastTargetPos=pos
+        Bypass.LastTargetAt=now
+        return false
+    end
+
+    local function bypassClampPrediction(fromPos, toPos)
+        local diff=toPos-fromPos
+        if diff.Magnitude>Bypass.MaxPredictOffset then
+            diff=diff.Unit*Bypass.MaxPredictOffset
+        end
+        return fromPos+diff
+    end
+
+    local function validTarget(char)
+        if not char or not char.Parent then return false end
+        local hum=char:FindFirstChildOfClass("Humanoid")
+        local hrp=char:FindFirstChild("HumanoidRootPart")
+        return hum and hrp and hum.Health>0
+    end
+
+    local function getTargetChar(myHRP)
+        if lockedChar and not validTarget(lockedChar) then lockedChar=nil end
+        if lockedChar then
+            return lockedChar:FindFirstChild("HumanoidRootPart"), lockedChar
+        end
+        local best, bestD=nil, math.huge
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p~=LP and validTarget(p.Character) then
+                local tHRP=p.Character:FindFirstChild("HumanoidRootPart")
+                local d=(tHRP.Position-myHRP.Position).Magnitude
+                if d<bestD then bestD, best=d, p.Character end
+            end
+        end
+        lockedChar=best
+        return best and best:FindFirstChild("HumanoidRootPart"), best
+    end
+
+    local function doSwing(tool)
+        if swingCooldown then return end
+        swingCooldown=true
+        pcall(function() tool:Activate() end)
+        task.delay(0.08, function() swingCooldown=false end)
+    end
+
+    bypassReset()
+
     local hum0=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
     if hum0 then hum0.AutoRotate=false end
 
-    Conns.aimbot=RunService.RenderStepped:Connect(function(dt)
+    Conns.aimbot=RunService.Heartbeat:Connect(function()
         if not State.autoBatToggled then return end
         local char=LP.Character
-        if not char then return end
-        local root=char:FindFirstChild("HumanoidRootPart")
-        local hum=char:FindFirstChildOfClass("Humanoid")
-        if not root or not hum or hum.Health<=0 then return end
+        if not char or not char.Parent then return end
+        local myHRP=char:FindFirstChild("HumanoidRootPart")
+        local myH=char:FindFirstChildOfClass("Humanoid")
+        if not myHRP or not myH or myH.Health<=0 then return end
 
-        hum.AutoRotate=false
+        myH.AutoRotate=false
 
         local bat=char:FindFirstChildOfClass("Tool")
         local function isBatTool(tool)
@@ -4050,65 +4241,56 @@ startBatAimbot=function()
             bat=char:FindFirstChildOfClass("Tool")
         end
 
-        local target=getClosestTarget()
-        if not target then
+        pcall(function() myH:Move(Vector3.zero, false) end)
+
+        local tHRP, tChar=getTargetChar(myHRP)
+        if tHRP and tChar and tHRP.Parent and tChar.Parent then
+            noTargetSince=nil
+            _aimbotTarget=tHRP
+
+            local now=tick()
+            if bypassIsTeleport(tHRP, now) then
+                myHRP.AssemblyLinearVelocity=Vector3.zero
+                return
+            end
+
+            local tVel=bypassGetStableVelocity(tHRP, now)
+            local predictTime=math.clamp(tVel.Magnitude/150, 0.05, 0.2)
+            local predicted=tHRP.Position+tVel*predictTime
+            predicted=bypassClampPrediction(tHRP.Position, predicted)
+
+            local standPos=predicted+Vector3.new(0, HEIGHT+VERT_OFFSET, 0)
+            local moveDir=standPos-myHRP.Position
+
+            local lookTarget=Vector3.new(predicted.X, myHRP.Position.Y, predicted.Z)
+            if (lookTarget-myHRP.Position).Magnitude>0.1 then
+                myHRP.CFrame=CFrame.lookAt(myHRP.Position, lookTarget)
+            end
+
+            local chaseSpeed=getAimbotChaseSpeed()
+            if moveDir.Magnitude>1 then
+                myHRP.AssemblyLinearVelocity=moveDir.Unit*chaseSpeed
+            else
+                myHRP.AssemblyLinearVelocity=tVel
+            end
+
+            if Config.AutoSwing and Config.BatAimbot and State.autoBatToggled then
+                local dist=(tHRP.Position-myHRP.Position).Magnitude
+                local tool=isBatTool(bat) and bat or nil
+                if tool and tool.Parent==char and dist<=HIT_DIST then
+                    doSwing(tool)
+                end
+            end
+        else
             _aimbotTarget=nil
-            root.AssemblyAngularVelocity=Vector3.zero
-            if _speedLVClear then pcall(_speedLVClear, root) end
-            return
-        end
-        _aimbotTarget=target
-
-        local myPos=root.Position
-        local targetPos=target.Position
-        local targetVel=target.AssemblyLinearVelocity
-
-        local predictBoost=targetVel*0.11+target.CFrame.LookVector*0.25
-        local aimPos=targetPos+predictBoost
-
-        local direction=aimPos-myPos
-        local flatDir=Vector3.new(direction.X,0,direction.Z)
-        if flatDir.Magnitude>0.05 then
-            flatDir=flatDir.Unit
-        else
-            flatDir=Vector3.zero
-        end
-
-        local chaseSpeed=getAimbotChaseSpeed()*1.08
-
-        if flatDir.Magnitude>0.05 then
-            _speedLVSet(root, flatDir.X*chaseSpeed, flatDir.Z*chaseSpeed)
-        else
-            if _speedLVClear then pcall(_speedLVClear, root) end
-        end
-
-        local desiredHeight=targetPos.Y
-        local yVel=(desiredHeight-myPos.Y)*24
-        yVel=math.clamp(yVel,-80,125)
-        local cur=root.AssemblyLinearVelocity
-        root.AssemblyLinearVelocity=Vector3.new(cur.X, cur.Y+(yVel-cur.Y)*0.92, cur.Z)
-
-        if flatDir.Magnitude>0.05 then
-            local lookAt=Vector3.new(aimPos.X, myPos.Y, aimPos.Z)
-            local goalCF=CFrame.lookAt(myPos, lookAt)
-            local alpha=1-math.exp(-math.clamp(dt or 0.016,0,0.1)*18)
-            root.CFrame=root.CFrame:Lerp(goalCF, alpha)
-        end
-
-        local toTarget=aimPos-myPos
-        if toTarget.Magnitude>0.1 then
-            local goalCF=CFrame.lookAt(myPos, aimPos)
-            local diffCF=root.CFrame:Inverse()*goalCF
-            local rx,ry,rz=diffCF:ToEulerAnglesXYZ()
-            rx=math.clamp(rx,-3.2,3.2)
-            ry=math.clamp(ry,-3.2,3.2)
-            rz=math.clamp(rz,-3.2,3.2)
-            root.AssemblyAngularVelocity=root.CFrame:VectorToWorldSpace(Vector3.new(rx*58, ry*58, rz*58))
-        end
-
-        local actualDistance=(targetPos-myPos).Magnitude
-        if Config.AutoSwing and Config.BatAimbot and State.autoBatToggled and isBatTool(bat) and actualDistance<=8 then
-            tryBatSwing()
+            if not noTargetSince then noTargetSince=tick() end
+            if tick()-noTargetSince>1.5 then
+                lockedChar=nil
+                bypassReset()
+                if myHRP and myHRP.Parent then
+                    myHRP.AssemblyLinearVelocity=Vector3.zero
+                end
+            end
         end
     end)
 end
@@ -4279,7 +4461,6 @@ startSpin = function()
     if spinConn then spinConn:Disconnect(); spinConn = nil end
     spinHumanoid = nil
     spinOldAutoRotate = nil
-    -- RenderStepped applies the spin after most character/Shift Lock rotation updates.
     spinConn = RunService.RenderStepped:Connect(function(dt)
         if not Config.Spin then return end
         local char = LP.Character
@@ -4293,11 +4474,8 @@ startSpin = function()
             spinOldAutoRotate = hum.AutoRotate
         end
         if hum and root and hum.Health > 0 then
-            -- Keep Shift Lock from taking ownership of facing while Spin is enabled.
             pcall(function() hum.AutoRotate = false end)
             pcall(function()
-                -- Restore Peak Hub's original Very Fast spin: 0.90 radians per frame.
-                -- Do not scale by dt; that was making the spin much slower than before.
                 root.CFrame = root.CFrame * CFrame.Angles(0, 0.90, 0)
                 root.AssemblyAngularVelocity = Vector3.zero
             end)
@@ -4515,7 +4693,6 @@ function forceAntiRagdollRecovery()
     end)
 end
 
--- Anti Ragdoll V1: versione leggera della reference, con un solo controllo Heartbeat.
 antiRagdollV1ReferenceConnection = nil
 antiRagdollV1CharacterConnection = nil
 
@@ -4613,8 +4790,6 @@ function stopAntiRagdollLH()
     AntiRagdollV1.CachedCharacter = nil
 end
 
--- Anti Ragdoll V2: usa la seconda logica della reference (RagdollEndTime,
--- rimozione dei constraint e ripristino dello stato/camera).
 AntiRagdollV2 = { Connection = nil, Character = nil, Humanoid = nil, Root = nil, CharacterConnection = nil }
 function cacheAntiRagdollV2Character()
     local char = LP.Character
@@ -6214,7 +6389,6 @@ function peakDetectAutoPlaySide()
 end
 
 function peakGetAutoPlayWaypoints(side)
-    -- 1 Btn e 2 Btn: stesso path semi (half), left/right diversi
     return side == "right" and AP_RIGHT_HALF or AP_LEFT_HALF
 end
 
@@ -6382,7 +6556,6 @@ RunService.PreSimulation:Connect(function()
             end
         end
     elseif State.autoBatToggled then
-        -- Bat Aimbot gestisce la velocity verso il target
     else
         applyVelocitySpeed(getActiveSpeed())
     end
@@ -6452,9 +6625,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
         saveConfig()
 
     elseif is(Config.LaggerSpeedKey or Config.LaggerCarryKey) then
-        -- Un solo keybind cicla: Lagger normale -> Lagger Carry -> spenti.
-        -- La variabile laggerSpeedEnabled resta disattivata per evitare conflitti
-        -- con le due modalità selezionate dal keybind.
         if laggerModeEnabled then
             laggerModeEnabled = false
             laggerCarryEnabled = true
@@ -6871,7 +7041,6 @@ function loadMobPos()
 end
 
 function saveMobPos()
-    -- Mantieni le posizioni gia salvate delle altre modalita.
     local out = loadMobPos()
     for key, fr in pairs(mobBtnFrames) do
         if fr and fr.Parent then
@@ -6898,8 +7067,21 @@ function destroyMobileButtons()
     mobBtnFrames = {}
 end
 
+function peakApplyHideButtons(hide)
+    hide = hide == true
+    Config.HideButtons = hide
+    if mobGuiRef then
+        pcall(function() mobGuiRef.Enabled = not hide end)
+    end
+    for _, fr in pairs(mobBtnFrames) do
+        if fr then
+            pcall(function() fr.Visible = not hide end)
+        end
+    end
+end
+_G.PeakHubApplyHideButtons = peakApplyHideButtons
+
 function buildMobileButtons()
-    -- Salva le posizioni correnti prima di ricreare i pulsanti.
     if next(mobBtnFrames) ~= nil then
         pcall(saveMobPos)
     end
@@ -6929,6 +7111,14 @@ function buildMobileButtons()
     end
 
     local scale = math.clamp((tonumber(Config.MobileButtonSize) or 50) / 50, 0.2, 2.5)
+    if UserInputService.TouchEnabled then
+        local vp = getViewportSize and getViewportSize() or Vector2.new(1280, 720)
+        if vp.Y < 520 then
+            scale = scale * 0.82
+        elseif vp.Y < 700 then
+            scale = scale * 0.9
+        end
+    end
     local BTN_W = math.floor(64 * scale)
     local BTN_H = math.floor(64 * scale)
     local GAP = math.floor(10 * scale)
@@ -7108,11 +7298,6 @@ function buildMobileButtons()
         btn.Name = def.key
         btn.Size = UDim2.new(0, BTN_W, 0, BTN_H)
         local pos = defaultPos(def)
-        -- Ripristina la posizione salvata per ogni side button.
-        -- Auto Play condivide la posizione più recente di Auto Left/Right;
-        -- tornando a 2 Btn, Left e Right recuperano ciascuno la propria.
-        -- Posizioni indipendenti: 1 Btn ha il suo slot; 2 Btn conserva
-        -- separatamente Auto Left e Auto Right. Non copiare posizioni tra modalità.
         local savedPos
         if def.key == "autoPlay" then
             savedPos = saved.autoPlay_1Btn or saved.autoPlay
@@ -7362,6 +7547,7 @@ function buildMobileButtons()
     end
 
     pcall(_G.__VyzeRefreshSafeModeMobileVisuals)
+    if peakApplyHideButtons then pcall(peakApplyHideButtons, Config.HideButtons == true) end
 end
 
 _G.VyzeApplyMobileButtonSize = function()
@@ -7994,7 +8180,6 @@ function waitForAnimate(char)
         if not char.Parent then return nil end
         local a = char:FindFirstChild("Animate")
         if a and a:FindFirstChild("walk") and a:FindFirstChild("run") then
-            -- Roblox may create the script before its animation folders are ready.
             local walk = a:FindFirstChild("walk")
             local run = a:FindFirstChild("run")
             if walk and run then return a end
@@ -8158,7 +8343,14 @@ LP.CharacterAdded:Connect(function(char)
 end)
 
 
-antiLagState = { conn = nil, active = false, cache = {}, lighting = nil, effects = {} }
+antiLagState = {
+    conn = nil,
+    active = false,
+    cache = {},
+    lighting = nil,
+    effects = {},
+    beauty = {},
+}
 
 function peakCacheProperty(instance, property)
     local entry = antiLagState.cache[instance]
@@ -8172,22 +8364,121 @@ end
 function _applyAntiLagObj(instance)
     if not antiLagState.active then return end
     pcall(function()
-        if instance:IsA("ParticleEmitter") or instance:IsA("Trail") or instance:IsA("Beam") or instance:IsA("Fire") or instance:IsA("Smoke") or instance:IsA("Sparkles") then
+        if instance:IsA("ParticleEmitter") or instance:IsA("Trail") or instance:IsA("Beam")
+            or instance:IsA("Fire") or instance:IsA("Smoke") or instance:IsA("Sparkles") then
             peakCacheProperty(instance, "Enabled")
             instance.Enabled = false
-        elseif instance:IsA("Decal") or instance:IsA("Texture") then
-            peakCacheProperty(instance, "Transparency")
-            instance.Transparency = 1
         elseif instance:IsA("BasePart") then
-            peakCacheProperty(instance, "Material")
-            peakCacheProperty(instance, "Reflectance")
             peakCacheProperty(instance, "CastShadow")
-            instance.Material = Enum.Material.Plastic
-            instance.Reflectance = 0
             instance.CastShadow = false
-        elseif instance:IsA("PostEffect") then
-            peakCacheProperty(instance, "Enabled")
-            instance.Enabled = false
+            if instance.Material == Enum.Material.Glass or instance.Material == Enum.Material.ForceField then
+                peakCacheProperty(instance, "Material")
+                peakCacheProperty(instance, "Reflectance")
+                instance.Material = Enum.Material.SmoothPlastic
+                instance.Reflectance = 0
+            end
+        end
+    end)
+end
+
+function peakClearBeautyEffects()
+    for _, obj in pairs(antiLagState.beauty) do
+        pcall(function()
+            if obj and obj.Parent then obj:Destroy() end
+        end)
+    end
+    table.clear(antiLagState.beauty)
+end
+
+function peakApplyEmotionalGraphics()
+    peakClearBeautyEffects()
+
+    local cc = Instance.new("ColorCorrectionEffect")
+    cc.Name = "PeakHubEmotionCC"
+    cc.Brightness = 0.06
+    cc.Contrast = 0.18
+    cc.Saturation = 0.22
+    cc.TintColor = Color3.fromRGB(255, 228, 242)
+    cc.Parent = Lighting
+    antiLagState.beauty.cc = cc
+
+    local bloom = Instance.new("BloomEffect")
+    bloom.Name = "PeakHubEmotionBloom"
+    bloom.Intensity = 0.55
+    bloom.Size = 28
+    bloom.Threshold = 0.92
+    bloom.Parent = Lighting
+    antiLagState.beauty.bloom = bloom
+
+    local dof = Instance.new("DepthOfFieldEffect")
+    dof.Name = "PeakHubEmotionDoF"
+    dof.FarIntensity = 0.18
+    dof.NearIntensity = 0.05
+    dof.FocusDistance = 28
+    dof.InFocusRadius = 22
+    dof.Parent = Lighting
+    antiLagState.beauty.dof = dof
+
+    local rays = Instance.new("SunRaysEffect")
+    rays.Name = "PeakHubEmotionRays"
+    rays.Intensity = 0.08
+    rays.Spread = 0.65
+    rays.Parent = Lighting
+    antiLagState.beauty.rays = rays
+
+    local atmo = Lighting:FindFirstChildOfClass("Atmosphere")
+    if not atmo then
+        atmo = Instance.new("Atmosphere")
+        atmo.Name = "PeakHubEmotionAtmosphere"
+        atmo.Parent = Lighting
+        antiLagState.beauty.atmo = atmo
+    else
+        antiLagState.beauty.atmoSaved = {
+            Density = atmo.Density,
+            Offset = atmo.Offset,
+            Color = atmo.Color,
+            Decay = atmo.Decay,
+            Glare = atmo.Glare,
+            Haze = atmo.Haze,
+        }
+    end
+    atmo.Density = 0.28
+    atmo.Offset = 0.12
+    atmo.Color = Color3.fromRGB(255, 190, 210)
+    atmo.Decay = Color3.fromRGB(120, 90, 160)
+    atmo.Glare = 0.35
+    atmo.Haze = 1.6
+
+    Lighting.Ambient = Color3.fromRGB(95, 70, 110)
+    Lighting.OutdoorAmbient = Color3.fromRGB(140, 110, 150)
+    Lighting.ColorShift_Top = Color3.fromRGB(255, 200, 230)
+    Lighting.ColorShift_Bottom = Color3.fromRGB(80, 60, 120)
+    Lighting.Brightness = 2.15
+    Lighting.EnvironmentDiffuseScale = 0.55
+    Lighting.EnvironmentSpecularScale = 0.35
+    Lighting.GlobalShadows = false
+    Lighting.FogColor = Color3.fromRGB(200, 160, 190)
+    Lighting.FogStart = 40
+    Lighting.FogEnd = 520
+    Lighting.ClockTime = 19.35
+    Lighting.GeographicLatitude = 25
+
+    task.spawn(function()
+        local t0 = tick()
+        while antiLagState.active do
+            local t = tick() - t0
+            local pulse = 0.5 + 0.5 * math.sin(t * 0.55)
+            local warm = Color3.fromRGB(255, 220, 235)
+            local cool = Color3.fromRGB(230, 210, 255)
+            if antiLagState.beauty.cc and antiLagState.beauty.cc.Parent then
+                antiLagState.beauty.cc.TintColor = warm:Lerp(cool, pulse * 0.45)
+                antiLagState.beauty.cc.Brightness = 0.04 + pulse * 0.05
+                antiLagState.beauty.cc.Saturation = 0.18 + pulse * 0.08
+            end
+            if antiLagState.beauty.bloom and antiLagState.beauty.bloom.Parent then
+                antiLagState.beauty.bloom.Intensity = 0.42 + pulse * 0.22
+            end
+            task.wait(0.08)
         end
     end)
 end
@@ -8199,9 +8490,17 @@ enableAntiLag = function()
     antiLagState.lighting = {
         GlobalShadows = Lighting.GlobalShadows,
         FogEnd = Lighting.FogEnd,
+        FogStart = Lighting.FogStart,
+        FogColor = Lighting.FogColor,
         Brightness = Lighting.Brightness,
+        Ambient = Lighting.Ambient,
+        OutdoorAmbient = Lighting.OutdoorAmbient,
+        ColorShift_Top = Lighting.ColorShift_Top,
+        ColorShift_Bottom = Lighting.ColorShift_Bottom,
         EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
         EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
+        ClockTime = Lighting.ClockTime,
+        GeographicLatitude = Lighting.GeographicLatitude,
     }
     for _, child in ipairs(Lighting:GetChildren()) do
         if child:IsA("PostEffect") then
@@ -8209,11 +8508,9 @@ enableAntiLag = function()
             pcall(function() child.Enabled = false end)
         end
     end
-    Lighting.GlobalShadows = false
-    Lighting.FogEnd = 9e9
-    Lighting.Brightness = 1
-    Lighting.EnvironmentDiffuseScale = 0
-    Lighting.EnvironmentSpecularScale = 0
+
+    peakApplyEmotionalGraphics()
+
     if antiLagState.conn then antiLagState.conn:Disconnect() end
     antiLagState.conn = workspace.DescendantAdded:Connect(function(descendant)
         if antiLagState.active then _applyAntiLagObj(descendant) end
@@ -8223,7 +8520,7 @@ enableAntiLag = function()
         for i = 1, #descendants do
             if not antiLagState.active then break end
             _applyAntiLagObj(descendants[i])
-            if i % 180 == 0 then task.wait() end
+            if i % 220 == 0 then task.wait() end
         end
     end)
 end
@@ -8231,20 +8528,40 @@ end
 disableAntiLag = function()
     antiLagState.active = false
     if antiLagState.conn then antiLagState.conn:Disconnect(); antiLagState.conn = nil end
+
+    peakClearBeautyEffects()
+
     for instance, properties in pairs(antiLagState.cache) do
         if instance and instance.Parent then
-            for property, value in pairs(properties) do pcall(function() instance[property] = value end) end
+            for property, value in pairs(properties) do
+                pcall(function() instance[property] = value end)
+            end
         end
     end
     table.clear(antiLagState.cache)
+
     for effect, enabled in pairs(antiLagState.effects) do
         if effect and effect.Parent then pcall(function() effect.Enabled = enabled end) end
     end
     table.clear(antiLagState.effects)
+
     if antiLagState.lighting then
-        for property, value in pairs(antiLagState.lighting) do pcall(function() Lighting[property] = value end) end
+        for property, value in pairs(antiLagState.lighting) do
+            pcall(function() Lighting[property] = value end)
+        end
         antiLagState.lighting = nil
     end
+
+    local atmo = Lighting:FindFirstChild("PeakHubEmotionAtmosphere")
+    if atmo then pcall(function() atmo:Destroy() end) end
+    local saved = antiLagState.beauty and antiLagState.beauty.atmoSaved
+    if saved then
+        local existing = Lighting:FindFirstChildOfClass("Atmosphere")
+        if existing then
+            for k, v in pairs(saved) do pcall(function() existing[k] = v end) end
+        end
+    end
+    table.clear(antiLagState.beauty)
 end
 
 
@@ -8330,8 +8647,6 @@ function ensureOverheadLabels(char)
     if not anchor then return end
 
     if overheadGui and overheadGui.Parent then
-        -- Dopo il reset il BillboardGui può restare parentato al vecchio character.
-        -- Riaggancialo al nuovo anchor invece di lasciare le scritte sul modello eliminato.
         if overheadGui.Adornee ~= anchor then
             overheadGui.Adornee = anchor
         end
@@ -8461,7 +8776,6 @@ LP.CharacterAdded:Connect(function(char)
     overheadRespawnToken += 1
     local thisToken = overheadRespawnToken
     task.spawn(function()
-        -- Il personaggio può arrivare prima delle parti; riprova finché l'anchor è disponibile.
         local deadline = os.clock() + 8
         repeat
             if thisToken ~= overheadRespawnToken or LP.Character ~= char then return end
@@ -8500,8 +8814,13 @@ task.defer(function()
     if syncAutoAntiDie then pcall(syncAutoAntiDie) end
     if Config.BatCounter and startBatCounter then pcall(startBatCounter) end
     if Config.MedusaCounter and startMedusaCounter then pcall(startMedusaCounter) end
-    if Config.PlayerESP and startPlayerEsp then pcall(startPlayerEsp) end
-    if Config.PlayerTracers and startPlayerTracers then pcall(startPlayerTracers) end
+    if Config.PlayerESP and startPlayerEsp then
+        pcall(startPlayerEsp)
+        Config.PlayerTracers = true
+        if startPlayerTracers then pcall(startPlayerTracers) end
+    elseif Config.PlayerTracers and startPlayerTracers then
+        pcall(startPlayerTracers)
+    end
     if Config.RagdollCountdown and LP.Character and hookRagdollCountdown then
         pcall(hookRagdollCountdown, LP.Character)
     end
@@ -8526,6 +8845,258 @@ __vyzeInitVisualLogic()
 
 
 
+
+
+do
+    local LPl = LP
+    local ALPHA_HELD = 0.85
+    local ALPHA_BASE = 0.7
+    local ATTR = "RHBrOrigT"
+    local state = {
+        held = Config.BrainrotTransparencyHeld == true,
+        base = Config.BrainrotTransparencyBase == true,
+        heldDirty = true,
+        baseDirty = true,
+    }
+
+    local BODY = {
+        Head=1, Torso=1, UpperTorso=1, LowerTorso=1, HumanoidRootPart=1,
+        ["Left Arm"]=1, ["Right Arm"]=1, ["Left Leg"]=1, ["Right Leg"]=1,
+        LeftUpperArm=1, LeftLowerArm=1, LeftHand=1, RightUpperArm=1, RightLowerArm=1, RightHand=1,
+        LeftUpperLeg=1, LeftLowerLeg=1, LeftFoot=1, RightUpperLeg=1, RightLowerLeg=1, RightFoot=1,
+    }
+
+    local function isMedusaPiece(inst)
+        local cur = inst
+        while cur and cur ~= workspace and cur ~= game do
+            if cur.Name == "RivalMedusaReplica" or cur.Name == "ShelMedusaBombSkin"
+                or cur.Name:lower():find("medusa", 1, true) then
+                return true
+            end
+            if cur:IsA("Tool") then
+                local n = cur.Name:lower()
+                if n:find("medusa", 1, true) or n:find("stone", 1, true) or n:find("head", 1, true) then
+                    return true
+                end
+            end
+            cur = cur.Parent
+        end
+        return false
+    end
+
+    local function setT(inst, on, alpha)
+        if inst:IsA("BasePart") or inst:IsA("Decal") or inst:IsA("Texture") then
+            local o = inst:GetAttribute(ATTR)
+            if isMedusaPiece(inst) then
+                if o ~= nil then
+                    inst.Transparency = o
+                    inst:SetAttribute(ATTR, nil)
+                end
+                return
+            end
+            if on then
+                if o == nil then o = inst.Transparency; inst:SetAttribute(ATTR, o) end
+                local want = math.max(o, alpha)
+                if inst.Transparency ~= want then inst.Transparency = want end
+            elseif o ~= nil then
+                inst.Transparency = o
+                inst:SetAttribute(ATTR, nil)
+            end
+        end
+    end
+
+    local function setXray(root, on)
+        local hl = root:FindFirstChild("RHBrXray")
+        if on then
+            if not hl then
+                hl = Instance.new("Highlight")
+                hl.Name = "RHBrXray"
+                hl.Adornee = root
+                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                hl.FillColor = Color3.fromRGB(255, 130, 20)
+                hl.FillTransparency = 1
+                hl.OutlineColor = Color3.fromRGB(255, 215, 130)
+                hl.OutlineTransparency = 1
+                hl.Parent = root
+            else
+                hl.FillTransparency = 1
+                hl.OutlineTransparency = 1
+            end
+        elseif hl then
+            hl:Destroy()
+        end
+    end
+
+    local function applyTree(root, on, alpha)
+        setT(root, on, alpha)
+        for _, d in ipairs(root:GetDescendants()) do setT(d, on, alpha) end
+        setXray(root, on)
+    end
+
+    local function topOf(part, char)
+        local top = part
+        local m = part:FindFirstAncestorOfClass("Model")
+        while m and m ~= workspace and m ~= char and not m:IsDescendantOf(char) do
+            top = m
+            m = m.Parent and m.Parent:FindFirstAncestorOfClass("Model")
+        end
+        return top
+    end
+
+    local function heldTargets(char)
+        local list, seen = {}, {}
+        local function add(o) if o and not seen[o] then seen[o] = true; list[#list+1] = o end end
+        for _, child in ipairs(char:GetChildren()) do
+            if child:IsA("Model") then
+                add(child)
+            elseif child:IsA("BasePart") and not BODY[child.Name] then
+                add(child)
+            end
+        end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if root then
+            local ok, connected = pcall(function() return root:GetConnectedParts(true) end)
+            if ok and connected then
+                for _, p in ipairs(connected) do
+                    if not p:IsDescendantOf(char) then add(topOf(p, char)) end
+                end
+            end
+        end
+        return list
+    end
+
+    local function myPlot()
+        local plots = workspace:FindFirstChild("Plots")
+        if not plots then return nil end
+        for _, plot in ipairs(plots:GetChildren()) do
+            local sign = plot:FindFirstChild("PlotSign")
+            local yb = sign and sign:FindFirstChild("YourBase")
+            if yb and yb:IsA("BillboardGui") and yb.Enabled then return plot end
+        end
+        return nil
+    end
+
+    local lastHeld = {}
+    local function processHeld(on)
+        local char = LPl.Character
+        if not char then return end
+        local targets = heldTargets(char)
+        local current = {}
+        for _, o in ipairs(targets) do
+            current[o] = true
+            applyTree(o, on, ALPHA_HELD)
+            lastHeld[o] = true
+        end
+        for o in pairs(lastHeld) do
+            if not current[o] then
+                if o.Parent then applyTree(o, false, ALPHA_HELD) end
+                lastHeld[o] = nil
+            end
+        end
+    end
+
+    local lastBase = {}
+    local function baseTargets()
+        local list, seen = {}, {}
+        local function add(o) if o and not seen[o] then seen[o] = true; list[#list+1] = o end end
+        local plots = workspace:FindFirstChild("Plots")
+        if not plots then return list end
+
+        for _, plot in ipairs(plots:GetChildren()) do
+            local pods = plot:FindFirstChild("AnimalPodiums")
+            if not pods then continue end
+
+            local function isContainer(inst)
+                return inst == workspace or inst == plot or inst == pods or inst.Parent == pods
+                    or inst:IsA("Folder")
+            end
+
+            for _, pod in ipairs(pods:GetChildren()) do
+                local podBase = pod:FindFirstChild("Base")
+                for _, c in ipairs(pod:GetChildren()) do
+                    if c ~= podBase and c:IsA("Model") and not c:FindFirstChildOfClass("Humanoid") then add(c) end
+                end
+                local spawnPart = podBase and podBase:FindFirstChild("Spawn")
+                if spawnPart and spawnPart:IsA("BasePart") then
+                    local ok, parts = pcall(function()
+                        return workspace:GetPartBoundsInRadius(spawnPart.Position + Vector3.new(0, 3, 0), 6)
+                    end)
+                    if ok and parts then
+                        for _, part in ipairs(parts) do
+                            if not part:IsDescendantOf(LPl.Character or workspace) or not LPl.Character then
+                                local top = nil
+                                local cur = part.Parent
+                                while cur and not isContainer(cur) do
+                                    if cur:IsA("Model") then top = cur end
+                                    cur = cur.Parent
+                                end
+                                if top and top ~= pod and top ~= podBase and not top:IsAncestorOf(podBase)
+                                   and not top:FindFirstChild("Spawn", true)
+                                   and not top:FindFirstChildOfClass("Humanoid")
+                                   and not top:IsDescendantOf(podBase)
+                                   and not (LPl.Character and top:IsDescendantOf(LPl.Character)) then
+                                    add(top)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return list
+    end
+
+    local function processBase(on)
+        local targets = baseTargets()
+        local current = {}
+        for _, o in ipairs(targets) do
+            current[o] = true
+            applyTree(o, on, ALPHA_BASE)
+            lastBase[o] = true
+        end
+        for o in pairs(lastBase) do
+            if not current[o] then
+                if o.Parent then applyTree(o, false, ALPHA_BASE) end
+                lastBase[o] = nil
+            end
+        end
+    end
+
+    local api = {
+        SetHeld = function(v)
+            state.held = v and true or false
+            state.heldDirty = true
+            Config.BrainrotTransparencyHeld = state.held
+        end,
+        SetBase = function(v)
+            state.base = v and true or false
+            state.baseDirty = true
+            Config.BrainrotTransparencyBase = state.base
+        end,
+    }
+    _G.RHBrainrotTransparency = api
+    _G.PeakHubBrainrotTransparency = api
+
+    task.spawn(function()
+        while true do
+            pcall(function()
+                if state.held or state.heldDirty then processHeld(state.held); state.heldDirty = false end
+            end)
+            task.wait(0.1)
+        end
+    end)
+    task.spawn(function()
+        while true do
+            pcall(function()
+                if state.base or state.baseDirty then processBase(state.base); state.baseDirty = false end
+            end)
+            task.wait(0.4)
+        end
+    end)
+
+    if Config.BrainrotTransparencyBase then api.SetBase(true) end
+    if Config.BrainrotTransparencyHeld then api.SetHeld(true) end
+end
 
 function playVyzeIntro()
     if Config.IntroEnabled == false then return end
@@ -8652,7 +9223,6 @@ function playVyzeIntro()
         pcall(function() if introBlur then introBlur:Destroy() end end)
         pcall(function() gui:Destroy() end)
         uf()
-        -- musica continua dopo skip/fine intro
     end)
 
 

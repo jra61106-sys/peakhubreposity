@@ -1,3 +1,6 @@
+
+
+
 TweenService = game:GetService("TweenService")
 RunService = game:GetService("RunService")
 Players = game:GetService("Players")
@@ -4007,35 +4010,18 @@ Conns = { aimbot = nil }
 
 
 
-BAT_PREDICTION_MIN = 0.05
-BAT_PREDICTION_MAX = 0.12
 BAT_PREDICTION_CACHE = {}
 
+-- Bat prediction helper based on the supplied reference:
+-- use a short forward offset when the target is nearly still, and a longer
+-- offset when it is moving. This helper calculates a point only; it does not
+-- move the local character or activate a tool.
 function getEnvyPredictedPosition(target)
-    local now = tick()
-    local sample = BAT_PREDICTION_CACHE[target]
-    local targetVelocity = Vector3.zero
-
-    if not sample then
-        BAT_PREDICTION_CACHE[target] = {
-            pos = target.Position,
-            time = now,
-            vel = Vector3.zero
-        }
-    else
-        local sampleDt = math.clamp(now - sample.time, 1 / 120, 0.25)
-        local rawVelocity = (target.Position - sample.pos) / sampleDt
-        if rawVelocity.Magnitude > 80 then
-            rawVelocity = rawVelocity.Unit * 80
-        end
-        sample.vel = sample.vel:Lerp(rawVelocity, 0.25)
-        sample.pos = target.Position
-        sample.time = now
-        targetVelocity = sample.vel
-    end
-
-    local predictionTime = math.clamp(targetVelocity.Magnitude / 130, BAT_PREDICTION_MIN, BAT_PREDICTION_MAX)
-    return target.Position + targetVelocity * predictionTime + Vector3.new(0, 1, 0)
+    if not target or not target.Parent then return nil end
+    local tVel = target.AssemblyLinearVelocity
+    if typeof(tVel) ~= "Vector3" then tVel = Vector3.zero end
+    local predictTime = math.clamp(tVel.Magnitude / 150, 0.05, 0.2)
+    return target.Position + tVel * predictTime
 end
 
 function findBat()
@@ -4116,181 +4102,187 @@ startBatAimbot=function()
     table.clear(mirrorTPPreviousY)
     if syncAutoAntiDie then pcall(syncAutoAntiDie) end
 
-    local HEIGHT=4.75
-    local VERT_OFFSET=1
-    local HIT_DIST=9
-    local lockedChar=nil
-    local noTargetSince=nil
-    local swingCooldown=false
+    -- Clean Aimbot logic (movement/look/swing/bypass), lower height, prediction ahead not behind
+    local HEIGHT = 3.25
+    local VERT_OFFSET = 0.35
+    local HIT_DIST = 9
+    local lockedChar = nil
+    local noTargetSince = nil
+    local swingCooldown = false
 
-    local Bypass={
-        VelocityCap=95,
-        TeleportThreshold=8,
-        LastTargetPos=nil,
-        LastTargetAt=nil,
-        StableVelocity=Vector3.zero,
-        MaxAccelPerSec=140,
-        MaxPredictOffset=8,
+    local Bypass = {
+        VelocityCap = 95,
+        TeleportThreshold = 8,
+        LastTargetPos = nil,
+        LastTargetAt = nil,
+        StableVelocity = Vector3.zero,
+        MaxAccelPerSec = 140,
+        MaxPredictOffset = 8,
     }
 
     local function bypassReset()
-        Bypass.LastTargetPos=nil
-        Bypass.LastTargetAt=nil
-        Bypass.StableVelocity=Vector3.zero
+        Bypass.LastTargetPos = nil
+        Bypass.LastTargetAt = nil
+        Bypass.StableVelocity = Vector3.zero
     end
 
     local function bypassGetStableVelocity(tHRP, now)
-        local raw=tHRP.AssemblyLinearVelocity
-        if raw.Magnitude>Bypass.VelocityCap then
-            raw=raw.Unit*Bypass.VelocityCap
+        local raw = tHRP.AssemblyLinearVelocity
+        if raw.Magnitude > Bypass.VelocityCap then
+            raw = raw.Unit * Bypass.VelocityCap
         end
-        local prev=Bypass.StableVelocity
-        local dt=math.max((Bypass.LastTargetAt and (now-Bypass.LastTargetAt)) or 0.016, 0.008)
-        local accel=(raw-prev)/dt
-        if accel.Magnitude>Bypass.MaxAccelPerSec then
-            accel=accel.Unit*Bypass.MaxAccelPerSec
+        local prev = Bypass.StableVelocity
+        local dt = math.max((Bypass.LastTargetAt and (now - Bypass.LastTargetAt)) or 0.016, 0.008)
+        local accel = (raw - prev) / dt
+        if accel.Magnitude > Bypass.MaxAccelPerSec then
+            accel = accel.Unit * Bypass.MaxAccelPerSec
         end
-        local stable=prev+accel*dt
-        Bypass.StableVelocity=stable
+        local stable = prev + accel * dt
+        Bypass.StableVelocity = stable
         return stable
     end
 
     local function bypassIsTeleport(tHRP, now)
-        local pos=tHRP.Position
+        local pos = tHRP.Position
         if Bypass.LastTargetPos and Bypass.LastTargetAt then
-            local dt=now-Bypass.LastTargetAt
-            if dt>0 and dt<0.5 then
-                local jump=(pos-Bypass.LastTargetPos).Magnitude
-                if jump>(Bypass.TeleportThreshold+Bypass.VelocityCap*dt) then
-                    Bypass.LastTargetPos=pos
-                    Bypass.LastTargetAt=now
+            local dt = now - Bypass.LastTargetAt
+            if dt > 0 and dt < 0.5 then
+                local jump = (pos - Bypass.LastTargetPos).Magnitude
+                if jump > (Bypass.TeleportThreshold + Bypass.VelocityCap * dt) then
+                    Bypass.LastTargetPos = pos
+                    Bypass.LastTargetAt = now
                     return true
                 end
             end
         end
-        Bypass.LastTargetPos=pos
-        Bypass.LastTargetAt=now
+        Bypass.LastTargetPos = pos
+        Bypass.LastTargetAt = now
         return false
     end
 
     local function bypassClampPrediction(fromPos, toPos)
-        local diff=toPos-fromPos
-        if diff.Magnitude>Bypass.MaxPredictOffset then
-            diff=diff.Unit*Bypass.MaxPredictOffset
+        local diff = toPos - fromPos
+        if diff.Magnitude > Bypass.MaxPredictOffset then
+            diff = diff.Unit * Bypass.MaxPredictOffset
         end
-        return fromPos+diff
+        return fromPos + diff
     end
 
     local function validTarget(char)
         if not char or not char.Parent then return false end
-        local hum=char:FindFirstChildOfClass("Humanoid")
-        local hrp=char:FindFirstChild("HumanoidRootPart")
-        return hum and hrp and hum.Health>0
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        return hum and hrp and hum.Health > 0
     end
 
     local function getTargetChar(myHRP)
-        if lockedChar and not validTarget(lockedChar) then lockedChar=nil end
+        if lockedChar and not validTarget(lockedChar) then lockedChar = nil end
         if lockedChar then
             return lockedChar:FindFirstChild("HumanoidRootPart"), lockedChar
         end
-        local best, bestD=nil, math.huge
+        local best, bestD = nil, math.huge
         for _, p in ipairs(Players:GetPlayers()) do
-            if p~=LP and validTarget(p.Character) then
-                local tHRP=p.Character:FindFirstChild("HumanoidRootPart")
-                local d=(tHRP.Position-myHRP.Position).Magnitude
-                if d<bestD then bestD, best=d, p.Character end
+            if p ~= LP and validTarget(p.Character) then
+                local tHRP = p.Character:FindFirstChild("HumanoidRootPart")
+                local d = (tHRP.Position - myHRP.Position).Magnitude
+                if d < bestD then bestD, best = d, p.Character end
             end
         end
-        lockedChar=best
+        lockedChar = best
         return best and best:FindFirstChild("HumanoidRootPart"), best
     end
 
     local function doSwing(tool)
         if swingCooldown then return end
-        swingCooldown=true
+        swingCooldown = true
         pcall(function() tool:Activate() end)
-        task.delay(0.08, function() swingCooldown=false end)
+        task.delay(0.08, function() swingCooldown = false end)
     end
 
     bypassReset()
 
-    local hum0=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum0 then hum0.AutoRotate=false end
+    local hum0 = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum0 then hum0.AutoRotate = false end
 
-    Conns.aimbot=RunService.Heartbeat:Connect(function()
+    Conns.aimbot = RunService.Heartbeat:Connect(function()
         if not State.autoBatToggled then return end
-        local char=LP.Character
+        local char = LP.Character
         if not char or not char.Parent then return end
-        local myHRP=char:FindFirstChild("HumanoidRootPart")
-        local myH=char:FindFirstChildOfClass("Humanoid")
-        if not myHRP or not myH or myH.Health<=0 then return end
+        local myHRP = char:FindFirstChild("HumanoidRootPart")
+        local myH = char:FindFirstChildOfClass("Humanoid")
+        if not myHRP or not myH or myH.Health <= 0 then return end
 
-        myH.AutoRotate=false
+        myH.AutoRotate = false
 
-        local bat=char:FindFirstChildOfClass("Tool")
+        local bat = char:FindFirstChildOfClass("Tool")
         local function isBatTool(tool)
             if not tool or not tool:IsA("Tool") then return false end
-            local n=tool.Name:lower()
-            return n:find("bat",1,true)~=nil or n:find("slap",1,true)~=nil
+            local n = tool.Name:lower()
+            return n:find("bat", 1, true) ~= nil or n:find("slap", 1, true) ~= nil
         end
         if not isBatTool(bat) then
             pcall(peakEquipBatOnce)
-            bat=char:FindFirstChildOfClass("Tool")
+            bat = char:FindFirstChildOfClass("Tool")
         end
 
         pcall(function() myH:Move(Vector3.zero, false) end)
 
-        local tHRP, tChar=getTargetChar(myHRP)
+        local tHRP, tChar = getTargetChar(myHRP)
         if tHRP and tChar and tHRP.Parent and tChar.Parent then
-            noTargetSince=nil
-            _aimbotTarget=tHRP
+            noTargetSince = nil
+            _aimbotTarget = tHRP
 
-            local now=tick()
+            local now = tick()
             if bypassIsTeleport(tHRP, now) then
-                myHRP.AssemblyLinearVelocity=Vector3.zero
+                myHRP.AssemblyLinearVelocity = Vector3.zero
                 return
             end
 
-            local tVel=bypassGetStableVelocity(tHRP, now)
-            local predictTime=math.clamp(tVel.Magnitude/150, 0.05, 0.2)
-            local predicted=tHRP.Position+tVel*predictTime
-            predicted=bypassClampPrediction(tHRP.Position, predicted)
+            local tVel = bypassGetStableVelocity(tHRP, now)
 
-            local standPos=predicted+Vector3.new(0, HEIGHT+VERT_OFFSET, 0)
-            local moveDir=standPos-myHRP.Position
+            -- Prediction: velocity lead AHEAD (not behind), no extra height in predict itself
+            local predictTime = math.clamp(tVel.Magnitude / 150, 0.05, 0.2)
+            local predicted = tHRP.Position + tVel * predictTime
+            predicted = bypassClampPrediction(tHRP.Position, predicted)
 
-            local lookTarget=Vector3.new(predicted.X, myHRP.Position.Y, predicted.Z)
-            if (lookTarget-myHRP.Position).Magnitude>0.1 then
-                myHRP.CFrame=CFrame.lookAt(myHRP.Position, lookTarget)
+            -- Lower stand height (not high like 5.75)
+            local standPos = predicted + Vector3.new(0, HEIGHT + VERT_OFFSET, 0)
+            local moveDir = standPos - myHRP.Position
+
+            -- Face predicted point (where they are going)
+            local lookTarget = Vector3.new(predicted.X, myHRP.Position.Y, predicted.Z)
+            if (lookTarget - myHRP.Position).Magnitude > 0.1 then
+                myHRP.CFrame = CFrame.lookAt(myHRP.Position, lookTarget)
             end
 
-            local chaseSpeed=getAimbotChaseSpeed()
-            if moveDir.Magnitude>1 then
-                myHRP.AssemblyLinearVelocity=moveDir.Unit*chaseSpeed
+            local chaseSpeed = getAimbotChaseSpeed()
+            if moveDir.Magnitude > 1 then
+                myHRP.AssemblyLinearVelocity = moveDir.Unit * chaseSpeed
             else
-                myHRP.AssemblyLinearVelocity=tVel
+                myHRP.AssemblyLinearVelocity = tVel
             end
 
             if Config.AutoSwing and Config.BatAimbot and State.autoBatToggled then
-                local dist=(tHRP.Position-myHRP.Position).Magnitude
-                local tool=isBatTool(bat) and bat or nil
-                if tool and tool.Parent==char and dist<=HIT_DIST then
+                local dist = (tHRP.Position - myHRP.Position).Magnitude
+                local tool = isBatTool(bat) and bat or nil
+                if tool and tool.Parent == char and dist <= HIT_DIST then
                     doSwing(tool)
                 end
             end
         else
-            _aimbotTarget=nil
-            if not noTargetSince then noTargetSince=tick() end
-            if tick()-noTargetSince>1.5 then
-                lockedChar=nil
+            _aimbotTarget = nil
+            if not noTargetSince then noTargetSince = tick() end
+            if tick() - noTargetSince > 1.5 then
+                lockedChar = nil
                 bypassReset()
                 if myHRP and myHRP.Parent then
-                    myHRP.AssemblyLinearVelocity=Vector3.zero
+                    myHRP.AssemblyLinearVelocity = Vector3.zero
                 end
             end
         end
     end)
 end
+
 
 stopBatAimbot=function()
     if Conns.aimbot then Conns.aimbot:Disconnect();Conns.aimbot=nil end

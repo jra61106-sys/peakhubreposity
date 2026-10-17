@@ -83,7 +83,7 @@ Config = {
     AntiDie = false,
     Spin = false,
     SafeMode = false,
-    UIScale = 40,
+    UIScale = 30,
     LockUI = false,
     HideUI = false,
     HideUIKey = "RightControl",
@@ -161,6 +161,9 @@ end
 
 loadConfig()
 
+-- Always start with Lock UI OFF when script is executed
+Config.LockUI = false
+_G.PeakHubUILocked = false
 
 Config.UIBackgroundUrl = "https://files.catbox.moe/sz7icy.png"
 
@@ -244,7 +247,8 @@ screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
-_G.PeakHubUILocked = Config.LockUI == true
+Config.LockUI = false
+_G.PeakHubUILocked = false
 main = Instance.new("Frame")
 main.Name = "Main"
 main.Size = UDim2.new(0, 340, 0, 545)
@@ -254,7 +258,7 @@ main.BackgroundColor3 = COLORS.Background
 main.BackgroundTransparency = 1
 main.BorderSizePixel = 0
 main.Active = true
-main.Draggable = not Config.LockUI
+main.Draggable = true
 main.Parent = screenGui
 
 do
@@ -451,7 +455,7 @@ function getMaxFitScale()
 end
 
 function getUserBaseScale()
-    return math.clamp((tonumber(Config.UIScale) or 40) / 40, 0.2, 2)
+    return math.clamp((tonumber(Config.UIScale) or 30) / 40, 0.2, 2)
 end
 
 function getEffectiveUIScale()
@@ -501,7 +505,7 @@ function getTargetUIScale()
 end
 
 function applyUIScale(val)
-    Config.UIScale = math.clamp(tonumber(val) or 40, 10, 100)
+    Config.UIScale = math.clamp(tonumber(val) or 30, 10, 100)
     local target = getEffectiveUIScale()
     if uiScaleObj then
         TweenService:Create(uiScaleObj, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -3349,7 +3353,9 @@ settings = makePage("Settings")
 
 
 main.Active = true
-main.Draggable = not Config.LockUI
+Config.LockUI = false
+_G.PeakHubUILocked = false
+main.Draggable = true
 if Config.HideUI then
     main.Visible = false
     uiMinimized = true
@@ -3977,7 +3983,7 @@ do
         Config.StretchRes = false
         Config.FOVChange = false
         Config.FOVValue = 70
-        Config.UIScale = 40
+        Config.UIScale = 30
         Config.LockUI = false
         Config.HideUI = false
         Config.StealBarPosX = nil
@@ -3988,7 +3994,7 @@ do
         Config.CircleButtons = false
         Config.HideButtons = false
         Config.IntroEnabled = true
-        applyUIScale(40)
+        applyUIScale(30)
         main.Active = true
         main.Draggable = true
         main.Visible = true
@@ -4020,10 +4026,6 @@ Conns = { aimbot = nil }
 
 BAT_PREDICTION_CACHE = {}
 
--- Bat prediction helper based on the supplied reference:
--- use a short forward offset when the target is nearly still, and a longer
--- offset when it is moving. This helper calculates a point only; it does not
--- move the local character or activate a tool.
 function getEnvyPredictedPosition(target)
     if not target or not target.Parent then return nil end
 
@@ -4105,8 +4107,6 @@ function getAimbotChaseSpeed()
     return math.max(0, tonumber(Config.AimbotSpeed) or 55)
 end
 
--- Clean Aimbot logic + Peak target/speed/tools (AutoSwing, Mirror TP Down)
--- Bypass Aimbot FULL logic (movement/look/swing) wired to Peak Hub
 startBatAimbot=function()
     if safeModeTryStart and not safeModeTryStart() then return end
     pcall(peakEquipBatOnce)
@@ -4216,7 +4216,6 @@ startBatAimbot=function()
         hum0.AutoRotate = false
     end
 
-    -- FULL Bypass Aimbot loop (RenderStepped)
     Conns.aimbot = RunService.RenderStepped:Connect(function()
         if not State.autoBatToggled then return end
         local char = LP.Character
@@ -4248,8 +4247,6 @@ startBatAimbot=function()
         local myPos = root.Position
         local targetPos = target.Position
 
-        -- Predict where the opponent will be, retaining the requested values.
-        -- Velocity predicts movement (0.14 s); LookVector adds a small forward lead (0.3).
         local targetVelocity = target.AssemblyLinearVelocity
         local predictionTime = 0.14
         local targetLook = target.CFrame.LookVector
@@ -4260,9 +4257,6 @@ startBatAimbot=function()
             predictedPos = targetPos + lead.Unit * maxLeadDistance
         end
 
-        -- Important: the predicted point is for tracking/aiming, not the chase destination.
-        -- Move to a point IN FRONT of the target's facing direction so lateral velocity
-        -- prediction cannot leave the final approach at the target's side.
         local targetForward = Vector3.new(targetLook.X, 0, targetLook.Z)
         if targetForward.Magnitude < 0.001 then
             local fallback = target.CFrame.RightVector
@@ -4284,7 +4278,6 @@ startBatAimbot=function()
             flatDir = Vector3.zero
         end
 
-        -- Peak UI Aimbot Speed (fallback 58 like original bypass)
         local chaseSpeed = math.clamp(
             (getAimbotChaseSpeed and getAimbotChaseSpeed()) or tonumber(Config.AimbotSpeed) or 58,
             1, 120
@@ -4300,8 +4293,6 @@ startBatAimbot=function()
         local desiredVel = Vector3.new(flatDir.X * chaseSpeed, yVel, flatDir.Z * chaseSpeed)
         root.AssemblyLinearVelocity = root.AssemblyLinearVelocity:Lerp(desiredVel, 0.8)
 
-        -- Face the direction the target is MOVING, not the direction it is looking.
-        -- Prefer its horizontal velocity; only fall back to LookVector when nearly still.
         local travelDir = Vector3.new(targetVelocity.X, 0, targetVelocity.Z)
         if travelDir.Magnitude > 1.25 then
             travelDir = travelDir.Unit
@@ -4396,7 +4387,6 @@ end
 
 
 
--- Peak Hub Instant Reset: adapted from Clean Hub and wired to keyboard/gamepad/mobile controls.
 local peakResetCooldown = false
 local peakResetThread = nil
 local peakResetCameraLocked = false

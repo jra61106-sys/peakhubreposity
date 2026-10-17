@@ -51,7 +51,7 @@ laggerCarryEnabled = false
 autoCarryBoost = false
 
 Config = {
-    NormalSpeed = 59.5,
+    NormalSpeed = 59,
     CarrySpeed = 29,
     AutoCarrySpeed = false,
     CarrySpeedKey = "C",
@@ -114,7 +114,7 @@ Config = {
     FOVValue = 70,
     BatAimbot = false,
     BatAimbotKey = "H",
-    AimbotSpeed = 58,
+    AimbotSpeed = 55,
     AutoSwing = true,
     AutoBrainrot = false,
     MirrorTPDown = false,
@@ -1680,13 +1680,16 @@ do
         clear()
     end
 
+    -- Bubble Hub movement speed logic (Oi): MoveDirection * speed, keep Y
     local function applyVelocityToHRP(dir, speed, hrp)
         if not hrp or not hrp.Parent then return end
         if State and State.autoBatToggled then return end
         if type(speed) ~= "number" or speed ~= speed or speed <= 0 or speed == math.huge then return end
 
         local verticalVelocity = hrp.AssemblyLinearVelocity.Y
-        if _G._ZurichHub_MovementBlocked == true or _G._CrystalHub_MovementBlocked == true then
+        if _G._ZurichHub_MovementBlocked == true
+            or _G._CrystalHub_MovementBlocked == true
+            or _G._BubbleHub_MovementBlocked == true then
             hrp.AssemblyLinearVelocity = _V3new(0, math.min(verticalVelocity, 0), 0)
             return
         end
@@ -1696,33 +1699,38 @@ do
                 if hrp.SetNetworkOwner then hrp:SetNetworkOwner(LP) end
             end)
             local unit = dir.Unit
+            -- Bubble: AssemblyLinearVelocity = Unit * speed, preserve Y
             hrp.AssemblyLinearVelocity = _V3new(unit.X * speed, verticalVelocity, unit.Z * speed)
             local visibleSpeed = math.min(speed, 20)
             S.spoofed = _V3new(unit.X * visibleSpeed, verticalVelocity, unit.Z * visibleSpeed)
             S.currentPlane = Vector2.new(unit.X * speed, unit.Z * speed)
             S.lastMoveDir = unit
         else
+            -- Bubble: no input -> zero XZ, keep Y
             S.spoofed = _V3new(0, verticalVelocity, 0)
             S.currentPlane = Vector2.zero
             hrp.AssemblyLinearVelocity = _V3new(0, verticalVelocity, 0)
         end
     end
 
+    -- Bubble Hub applySpeed: MoveDirection or held keys keep last dir
     local function applySpeed(speed)
         local char = LP.Character
         if not char then return end
         local hum = char:FindFirstChildOfClass("Humanoid")
         local root = char:FindFirstChild("HumanoidRootPart")
         if not hum or not root or hum.Health <= 0 then return end
+        -- Bubble: skip while aimbot / auto path / drop
         if State and State.autoBatToggled then return end
         if Config.AutoLeft or Config.AutoRight then return end
+        if _G.dropActive or dropActive then return end
         if isRagdollState(hum) then
             S.lastMoveDir = Vector3.zero
             return
         end
 
         S.root = root
-        local direction
+        local direction = nil
         if hum.MoveDirection.Magnitude > 0 then
             S.lastMoveDir = hum.MoveDirection
             direction = hum.MoveDirection
@@ -1826,14 +1834,14 @@ function getActiveSpeed()
     end
     if laggerCarryEnabled then return tonumber(Config.LaggerCarry) or 20 end
     if laggerModeEnabled or laggerSpeedEnabled then return tonumber(Config.LaggerSpeed) or 40 end
-    return tonumber(Config.NormalSpeed) or 59.5
+    return tonumber(Config.NormalSpeed) or 59
 end
 
 function getPathSpeed()
     if laggerModeEnabled or laggerSpeedEnabled or laggerCarryEnabled then
         return tonumber(Config.LaggerSpeed) or 40
     end
-    return tonumber(Config.NormalSpeed) or 59.5
+    return tonumber(Config.NormalSpeed) or 59
 end
 
 
@@ -3944,7 +3952,7 @@ do
     corner(btn, 8)
     btn.Activated:Connect(function()
 
-        Config.NormalSpeed = 59.5
+        Config.NormalSpeed = 59
         Config.CarrySpeed = 29
         Config.TPDownHeight = 20
         Config.AutoCarrySpeed = false
@@ -4018,10 +4026,13 @@ BAT_PREDICTION_CACHE = {}
 -- move the local character or activate a tool.
 function getEnvyPredictedPosition(target)
     if not target or not target.Parent then return nil end
-    local tVel = target.AssemblyLinearVelocity
-    if typeof(tVel) ~= "Vector3" then tVel = Vector3.zero end
-    local predictTime = math.clamp(tVel.Magnitude / 150, 0.05, 0.2)
-    return target.Position + tVel * predictTime
+
+    local velocity = target.AssemblyLinearVelocity
+    if not velocity or velocity.Magnitude < 0.1 then
+        return target.Position + target.CFrame.LookVector * 1.5
+    end
+
+    return target.Position + target.CFrame.LookVector * 5
 end
 
 function findBat()
@@ -4091,9 +4102,11 @@ function getAimbotChaseSpeed()
         if ok and keyCode and UserInputService:IsKeyDown(keyCode) then laggerActive = true end
     end
     if laggerActive then return math.max(0, tonumber(Config.LaggerSpeed) or 40) end
-    return math.max(0, tonumber(Config.AimbotSpeed) or 58)
+    return math.max(0, tonumber(Config.AimbotSpeed) or 55)
 end
 
+-- Clean Aimbot logic + Peak target/speed/tools (AutoSwing, Mirror TP Down)
+-- Bypass Aimbot FULL logic (movement/look/swing) wired to Peak Hub
 startBatAimbot=function()
     if safeModeTryStart and not safeModeTryStart() then return end
     pcall(peakEquipBatOnce)
@@ -4102,70 +4115,66 @@ startBatAimbot=function()
     table.clear(mirrorTPPreviousY)
     if syncAutoAntiDie then pcall(syncAutoAntiDie) end
 
-    -- Clean Aimbot logic (movement/look/swing/bypass), lower height, prediction ahead not behind
-    local HEIGHT = 3.25
-    local VERT_OFFSET = 0.35
-    local HIT_DIST = 9
+    local HIT_DIST = 8
+    local SWING_CD = 0.35
+    local hitCD = false
+    local prevAutoRotate = nil
     local lockedChar = nil
     local noTargetSince = nil
-    local swingCooldown = false
 
-    local Bypass = {
-        VelocityCap = 95,
-        TeleportThreshold = 8,
-        LastTargetPos = nil,
-        LastTargetAt = nil,
-        StableVelocity = Vector3.zero,
-        MaxAccelPerSec = 140,
-        MaxPredictOffset = 8,
+    local BAT_SLAP_LIST = {
+        "Bat", "Slap", "Iron Slap", "Gold Slap", "Diamond Slap",
+        "Emerald Slap", "Ruby Slap", "Dark Matter Slap", "Flame Slap",
+        "Nuclear Slap", "Galaxy Slap", "Glitched Slap"
     }
 
-    local function bypassReset()
-        Bypass.LastTargetPos = nil
-        Bypass.LastTargetAt = nil
-        Bypass.StableVelocity = Vector3.zero
-    end
-
-    local function bypassGetStableVelocity(tHRP, now)
-        local raw = tHRP.AssemblyLinearVelocity
-        if raw.Magnitude > Bypass.VelocityCap then
-            raw = raw.Unit * Bypass.VelocityCap
+    local function findBatLocal()
+        local char = LP.Character
+        if not char then return nil end
+        for _, name in ipairs(BAT_SLAP_LIST) do
+            local t = char:FindFirstChild(name)
+            if t and t:IsA("Tool") then return t end
         end
-        local prev = Bypass.StableVelocity
-        local dt = math.max((Bypass.LastTargetAt and (now - Bypass.LastTargetAt)) or 0.016, 0.008)
-        local accel = (raw - prev) / dt
-        if accel.Magnitude > Bypass.MaxAccelPerSec then
-            accel = accel.Unit * Bypass.MaxAccelPerSec
+        local bp = LP:FindFirstChildOfClass("Backpack")
+        if bp then
+            for _, name in ipairs(BAT_SLAP_LIST) do
+                local t = bp:FindFirstChild(name)
+                if t and t:IsA("Tool") then return t end
+            end
         end
-        local stable = prev + accel * dt
-        Bypass.StableVelocity = stable
-        return stable
-    end
-
-    local function bypassIsTeleport(tHRP, now)
-        local pos = tHRP.Position
-        if Bypass.LastTargetPos and Bypass.LastTargetAt then
-            local dt = now - Bypass.LastTargetAt
-            if dt > 0 and dt < 0.5 then
-                local jump = (pos - Bypass.LastTargetPos).Magnitude
-                if jump > (Bypass.TeleportThreshold + Bypass.VelocityCap * dt) then
-                    Bypass.LastTargetPos = pos
-                    Bypass.LastTargetAt = now
-                    return true
+        for _, ch in ipairs(char:GetChildren()) do
+            if ch:IsA("Tool") then
+                local n = ch.Name:lower()
+                if n:find("bat", 1, true) or n:find("slap", 1, true) then return ch end
+            end
+        end
+        if bp then
+            for _, ch in ipairs(bp:GetChildren()) do
+                if ch:IsA("Tool") then
+                    local n = ch.Name:lower()
+                    if n:find("bat", 1, true) or n:find("slap", 1, true) then return ch end
                 end
             end
         end
-        Bypass.LastTargetPos = pos
-        Bypass.LastTargetAt = now
-        return false
+        return nil
     end
 
-    local function bypassClampPrediction(fromPos, toPos)
-        local diff = toPos - fromPos
-        if diff.Magnitude > Bypass.MaxPredictOffset then
-            diff = diff.Unit * Bypass.MaxPredictOffset
-        end
-        return fromPos + diff
+    local function trySwing()
+        if hitCD then return end
+        if not (Config.AutoSwing and Config.BatAimbot and State.autoBatToggled) then return end
+        hitCD = true
+        pcall(function()
+            local char = LP.Character
+            if not char then return end
+            local bat = findBatLocal()
+            if not bat then return end
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if bat.Parent ~= char and hum then
+                pcall(function() hum:EquipTool(bat) end)
+            end
+            pcall(function() bat:Activate() end)
+        end)
+        task.delay(SWING_CD, function() hitCD = false end)
     end
 
     local function validTarget(char)
@@ -4175,118 +4184,146 @@ startBatAimbot=function()
         return hum and hrp and hum.Health > 0
     end
 
-    local function getTargetChar(myHRP)
+    local function getClosestTarget(root)
         if lockedChar and not validTarget(lockedChar) then lockedChar = nil end
         if lockedChar then
-            return lockedChar:FindFirstChild("HumanoidRootPart"), lockedChar
-        end
-        local best, bestD = nil, math.huge
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LP and validTarget(p.Character) then
-                local tHRP = p.Character:FindFirstChild("HumanoidRootPart")
-                local d = (tHRP.Position - myHRP.Position).Magnitude
-                if d < bestD then bestD, best = d, p.Character end
+            local hrp = lockedChar:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                return hrp, (hrp.Position - root.Position).Magnitude
             end
+            lockedChar = nil
         end
-        lockedChar = best
-        return best and best:FindFirstChild("HumanoidRootPart"), best
-    end
-
-    local function doSwing(tool)
-        if swingCooldown then return end
-        swingCooldown = true
-        pcall(function() tool:Activate() end)
-        task.delay(0.08, function() swingCooldown = false end)
-    end
-
-    bypassReset()
-
-    local hum0 = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum0 then hum0.AutoRotate = false end
-
-    Conns.aimbot = RunService.Heartbeat:Connect(function()
-        if not State.autoBatToggled then return end
-        local char = LP.Character
-        if not char or not char.Parent then return end
-        local myHRP = char:FindFirstChild("HumanoidRootPart")
-        local myH = char:FindFirstChildOfClass("Humanoid")
-        if not myHRP or not myH or myH.Health <= 0 then return end
-
-        myH.AutoRotate = false
-
-        local bat = char:FindFirstChildOfClass("Tool")
-        local function isBatTool(tool)
-            if not tool or not tool:IsA("Tool") then return false end
-            local n = tool.Name:lower()
-            return n:find("bat", 1, true) ~= nil or n:find("slap", 1, true) ~= nil
-        end
-        if not isBatTool(bat) then
-            pcall(peakEquipBatOnce)
-            bat = char:FindFirstChildOfClass("Tool")
-        end
-
-        pcall(function() myH:Move(Vector3.zero, false) end)
-
-        local tHRP, tChar = getTargetChar(myHRP)
-        if tHRP and tChar and tHRP.Parent and tChar.Parent then
-            noTargetSince = nil
-            _aimbotTarget = tHRP
-
-            local now = tick()
-            if bypassIsTeleport(tHRP, now) then
-                myHRP.AssemblyLinearVelocity = Vector3.zero
-                return
-            end
-
-            local tVel = bypassGetStableVelocity(tHRP, now)
-
-            -- Prediction: velocity lead AHEAD (not behind), no extra height in predict itself
-            local predictTime = math.clamp(tVel.Magnitude / 150, 0.05, 0.2)
-            local predicted = tHRP.Position + tVel * predictTime
-            predicted = bypassClampPrediction(tHRP.Position, predicted)
-
-            -- Lower stand height (not high like 5.75)
-            local standPos = predicted + Vector3.new(0, HEIGHT + VERT_OFFSET, 0)
-            local moveDir = standPos - myHRP.Position
-
-            -- Face predicted point (where they are going)
-            local lookTarget = Vector3.new(predicted.X, myHRP.Position.Y, predicted.Z)
-            if (lookTarget - myHRP.Position).Magnitude > 0.1 then
-                myHRP.CFrame = CFrame.lookAt(myHRP.Position, lookTarget)
-            end
-
-            local chaseSpeed = getAimbotChaseSpeed()
-            if moveDir.Magnitude > 1 then
-                myHRP.AssemblyLinearVelocity = moveDir.Unit * chaseSpeed
-            else
-                myHRP.AssemblyLinearVelocity = tVel
-            end
-
-            if Config.AutoSwing and Config.BatAimbot and State.autoBatToggled then
-                local dist = (tHRP.Position - myHRP.Position).Magnitude
-                local tool = isBatTool(bat) and bat or nil
-                if tool and tool.Parent == char and dist <= HIT_DIST then
-                    doSwing(tool)
+        local closest, minDist = nil, math.huge
+        local bestChar = nil
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LP and validTarget(plr.Character) then
+                local tRoot = plr.Character:FindFirstChild("HumanoidRootPart")
+                local dist = (tRoot.Position - root.Position).Magnitude
+                if dist < minDist then
+                    minDist = dist
+                    closest = tRoot
+                    bestChar = plr.Character
                 end
             end
-        else
+        end
+        lockedChar = bestChar
+        return closest, minDist
+    end
+
+    local hum0 = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum0 then
+        prevAutoRotate = hum0.AutoRotate
+        hum0.AutoRotate = false
+    end
+
+    -- FULL Bypass Aimbot loop (RenderStepped)
+    Conns.aimbot = RunService.RenderStepped:Connect(function()
+        if not State.autoBatToggled then return end
+        local char = LP.Character
+        if not char then return end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then return end
+
+        hum.AutoRotate = false
+
+        if not char:FindFirstChildOfClass("Tool") then
+            local bat = findBatLocal()
+            if bat then pcall(function() hum:EquipTool(bat) end) end
+        end
+
+        local target, targetDist = getClosestTarget(root)
+        if not target then
             _aimbotTarget = nil
             if not noTargetSince then noTargetSince = tick() end
             if tick() - noTargetSince > 1.5 then
                 lockedChar = nil
-                bypassReset()
-                if myHRP and myHRP.Parent then
-                    myHRP.AssemblyLinearVelocity = Vector3.zero
-                end
             end
+            return
+        end
+        noTargetSince = nil
+        _aimbotTarget = target
+
+        local myPos = root.Position
+        local targetPos = target.Position
+
+        -- Predict where the opponent will be, retaining the requested values.
+        -- Velocity predicts movement (0.14 s); LookVector adds a small forward lead (0.3).
+        local targetVelocity = target.AssemblyLinearVelocity
+        local predictionTime = 0.14
+        local targetLook = target.CFrame.LookVector
+        local predictedPos = targetPos + targetVelocity * predictionTime + targetLook * 0.3
+        local lead = predictedPos - targetPos
+        local maxLeadDistance = 7.5
+        if lead.Magnitude > maxLeadDistance then
+            predictedPos = targetPos + lead.Unit * maxLeadDistance
+        end
+
+        -- Important: the predicted point is for tracking/aiming, not the chase destination.
+        -- Move to a point IN FRONT of the target's facing direction so lateral velocity
+        -- prediction cannot leave the final approach at the target's side.
+        local targetForward = Vector3.new(targetLook.X, 0, targetLook.Z)
+        if targetForward.Magnitude < 0.001 then
+            local fallback = target.CFrame.RightVector
+            targetForward = Vector3.new(-fallback.X, 0, -fallback.Z)
+        end
+        if targetForward.Magnitude > 0 then
+            targetForward = targetForward.Unit
+        else
+            targetForward = Vector3.new(0, 0, -1)
+        end
+        local FRONT_OFFSET = 3.5
+        local chasePos = predictedPos + targetForward * FRONT_OFFSET
+
+        local direction = chasePos - myPos
+        local flatDir = Vector3.new(direction.X, 0, direction.Z)
+        if flatDir.Magnitude > 0 then
+            flatDir = flatDir.Unit
+        else
+            flatDir = Vector3.zero
+        end
+
+        -- Peak UI Aimbot Speed (fallback 58 like original bypass)
+        local chaseSpeed = math.clamp(
+            (getAimbotChaseSpeed and getAimbotChaseSpeed()) or tonumber(Config.AimbotSpeed) or 58,
+            1, 120
+        )
+
+        local desiredHeight = chasePos.Y + 3.7
+        local yVel = (desiredHeight - myPos.Y) * 19.5
+        if hum.FloorMaterial ~= Enum.Material.Air then
+            yVel = math.max(yVel, 13)
+        end
+        yVel = math.clamp(yVel, -70, 110)
+
+        local desiredVel = Vector3.new(flatDir.X * chaseSpeed, yVel, flatDir.Z * chaseSpeed)
+        root.AssemblyLinearVelocity = root.AssemblyLinearVelocity:Lerp(desiredVel, 0.8)
+
+        -- Face the direction the target is MOVING, not the direction it is looking.
+        -- Prefer its horizontal velocity; only fall back to LookVector when nearly still.
+        local travelDir = Vector3.new(targetVelocity.X, 0, targetVelocity.Z)
+        if travelDir.Magnitude > 1.25 then
+            travelDir = travelDir.Unit
+        else
+            travelDir = targetForward
+        end
+        local facePos = myPos + travelDir * 10
+        if (facePos - myPos).Magnitude > 0.1 then
+            root.CFrame = CFrame.lookAt(myPos, facePos)
+            root.AssemblyAngularVelocity = Vector3.zero
+        end
+
+        if targetDist <= HIT_DIST then
+            trySwing()
         end
     end)
 end
 
-
 stopBatAimbot=function()
-    if Conns.aimbot then Conns.aimbot:Disconnect();Conns.aimbot=nil end
-    _aimbotTarget=nil;batSwingCooldown=false
+    if Conns.aimbot then Conns.aimbot:Disconnect(); Conns.aimbot=nil end
+    _aimbotTarget=nil
+    batSwingCooldown=false
     BAT_PREDICTION_CACHE={}
     local c=LP.Character
     local root=c and c:FindFirstChild("HumanoidRootPart")
@@ -4295,12 +4332,18 @@ stopBatAimbot=function()
         root.AssemblyAngularVelocity=Vector3.zero
     end
     local hum2=c and c:FindFirstChildOfClass("Humanoid")
-    if hum2 then hum2.AutoRotate=true end
+    if hum2 then
+        hum2.AutoRotate=true
+        hum2.PlatformStand=false
+        pcall(function() hum2:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+    end
     State.hittingCooldown=false
     mirrorTPActive=false
     table.clear(mirrorTPPreviousY)
     if syncAutoAntiDie then pcall(syncAutoAntiDie) end
 end
+
+
 
 do
     local MIRROR_TP_DROP_THRESHOLD = 3
@@ -4468,14 +4511,13 @@ function isRagdollState(hum)
 end
 
 function protectCharAntiDie(char)
+    -- Bubble-style Anti Die only
     if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
     if not hum then return end
 
     pcall(function()
         hum.BreakJointsOnDeath = false
-        hum.MaxHealth = math.huge
-        hum.Health = math.huge
         hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
     end)
 
@@ -4483,8 +4525,9 @@ function protectCharAntiDie(char)
         if not antiDieActive or _isInstaResetting then return end
         if new == Enum.HumanoidStateType.Dead then
             pcall(function()
-                hum.Health = math.huge
+                hum.BreakJointsOnDeath = false
                 hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+                hum.Health = hum.MaxHealth
             end)
         end
     end)
@@ -4492,17 +4535,41 @@ function protectCharAntiDie(char)
 
     local hc = hum:GetPropertyChangedSignal("Health"):Connect(function()
         if not antiDieActive or _isInstaResetting then return end
-        if hum.Health < hum.MaxHealth then
-            pcall(function() hum.Health = math.huge end)
+        if hum.Health <= 0 then
+            pcall(function()
+                hum.BreakJointsOnDeath = false
+                hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+                hum.Health = hum.MaxHealth
+            end)
         end
     end)
     table.insert(antiDieDeathConns, hc)
 
+    local died = hum.Died:Connect(function()
+        if not antiDieActive or _isInstaResetting then return end
+        task.defer(function()
+            if not antiDieActive or not hum or not hum.Parent then return end
+            pcall(function()
+                hum.BreakJointsOnDeath = false
+                hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+                hum.Health = hum.MaxHealth
+            end)
+        end)
+    end)
+    table.insert(antiDieDeathConns, died)
+
     if antiDieHeartConn then antiDieHeartConn:Disconnect() end
     antiDieHeartConn = RunService.Heartbeat:Connect(function()
         if not antiDieActive or _isInstaResetting then return end
-        if hum and hum.Parent and hum.Health < hum.MaxHealth then
-            pcall(function() hum.Health = math.huge end)
+        if not hum or not hum.Parent then return end
+        if hum.BreakJointsOnDeath then
+            pcall(function() hum.BreakJointsOnDeath = false end)
+        end
+        if hum:GetStateEnabled(Enum.HumanoidStateType.Dead) then
+            pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false) end)
+        end
+        if hum.Health <= 0 then
+            pcall(function() hum.Health = hum.MaxHealth end)
         end
     end)
 end
@@ -6620,19 +6687,15 @@ LP:GetAttributeChangedSignal("Stealing"):Connect(function()
     autoCarryBoost = isStealing == true
 end)
 
+-- AutoSwing stay on PreSimulation
 RunService.PreSimulation:Connect(function()
     local char = LP.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-
-
     if char and Config.AutoSwing and State.autoBatToggled and Config.BatAimbot then
         local tool = char:FindFirstChildOfClass("Tool")
         if tool and (tool.Name:lower():find("bat") or tool.Name:lower():find("slap")) then
             tool:Activate()
         end
     end
-
-
 
     if Config.AutoLeft or Config.AutoRight then
         if pathMoveDir and pathMoveDir.Magnitude > 0.01 then
@@ -6643,11 +6706,15 @@ RunService.PreSimulation:Connect(function()
                 pathApplySpeed(hrp2, hum2, pathMoveDir, getPathSpeed())
             end
         end
-    elseif State.autoBatToggled then
-    else
-        applyVelocitySpeed(getActiveSpeed())
     end
+end)
 
+-- Bubble Hub Speed Boost movement (RenderStepped) — same Oi logic
+RunService.RenderStepped:Connect(function()
+    if State and State.autoBatToggled then return end
+    if Config.AutoLeft or Config.AutoRight then return end
+    if _G.dropActive or dropActive then return end
+    applyVelocitySpeed(getActiveSpeed())
 end)
 
 lastCarryKeyTime = 0
@@ -7627,6 +7694,7 @@ function clearEspFor(plr)
     local o = _espObjects[plr]
     if not o then return end
     if o.highlight then pcall(function() o.highlight:Destroy() end) end
+    if o.billboard then pcall(function() o.billboard:Destroy() end) end
     if o.line then destroyTracerLine(o.line) end
     _espObjects[plr] = nil
 end
@@ -7645,17 +7713,32 @@ function updatePlayerEsp(plr)
     local char = plr.Character
     local myChar = LP.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local head = char and (char:FindFirstChild("Head") or hrp)
     local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local cam = workspace.CurrentCamera
-    if not hrp or not cam then clearEspFor(plr); return end
     local o = _espObjects[plr]
     if not o then o = {}; _espObjects[plr] = o end
+
+    if not char or not hrp or not cam then
+        if o.highlight then o.highlight.Enabled = false end
+        if o.billboard then o.billboard.Enabled = false end
+        if o.line then
+            if typeof(o.line) == "Instance" then o.line.Visible = false
+            else pcall(function() o.line.Visible = false end) end
+        end
+        return
+    end
+
+    local accent = _G.PeakHubThemeAccent or TRACER_COLOR or Color3.fromRGB(255, 120, 0)
+    local pg = LP:FindFirstChild("PlayerGui")
+
     if playerEspEnabled then
         if not o.highlight or not o.highlight.Parent then
+            pcall(function() if o.highlight then o.highlight:Destroy() end end)
             local hl = Instance.new("Highlight")
             hl.Name = "VyzeHL"
-            hl.FillColor = TRACER_COLOR
-            hl.OutlineColor = TRACER_COLOR
+            hl.FillColor = accent
+            hl.OutlineColor = accent
             hl.FillTransparency = 0.45
             hl.OutlineTransparency = 0
             hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
@@ -7663,12 +7746,78 @@ function updatePlayerEsp(plr)
             hl.Parent = char
             o.highlight = hl
         else
+            o.highlight.Enabled = true
             o.highlight.Adornee = char
+            o.highlight.FillColor = accent
+            o.highlight.OutlineColor = accent
         end
-    elseif o.highlight then
-        pcall(function() o.highlight:Destroy() end)
-        o.highlight = nil
+
+        -- Bubble-style: name + horizontal speed (persistent billboard on PlayerGui)
+        if not o.billboard or not o.billboard.Parent then
+            pcall(function() if o.billboard then o.billboard:Destroy() end end)
+            local bb = Instance.new("BillboardGui")
+            bb.Name = "PeakHubPlayerESP_" .. tostring(plr.UserId)
+            bb.Size = UDim2.fromOffset(160, 44)
+            bb.StudsOffset = Vector3.new(0, 2.4, 0)
+            bb.AlwaysOnTop = true
+            bb.MaxDistance = math.huge
+            bb.Adornee = head
+            bb.ResetOnSpawn = false
+            if pg then bb.Parent = pg
+            else
+                pcall(function()
+                    if gethui then bb.Parent = gethui() else bb.Parent = game:GetService("CoreGui") end
+                end)
+                if not bb.Parent then bb.Parent = head end
+            end
+            local nameLbl = Instance.new("TextLabel")
+            nameLbl.Name = "NameLabel"
+            nameLbl.Size = UDim2.new(1, 0, 0, 20)
+            nameLbl.BackgroundTransparency = 1
+            nameLbl.Font = Enum.Font.GothamBlack
+            nameLbl.TextSize = 14
+            nameLbl.TextColor3 = accent
+            nameLbl.TextStrokeTransparency = 0.15
+            nameLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+            nameLbl.Text = plr.DisplayName or plr.Name or ""
+            nameLbl.Parent = bb
+            local speedLbl = Instance.new("TextLabel")
+            speedLbl.Name = "SpeedLabel"
+            speedLbl.Size = UDim2.new(1, 0, 0, 18)
+            speedLbl.Position = UDim2.new(0, 0, 0, 20)
+            speedLbl.BackgroundTransparency = 1
+            speedLbl.Font = Enum.Font.GothamBold
+            speedLbl.TextSize = 13
+            speedLbl.TextColor3 = accent
+            speedLbl.TextStrokeTransparency = 0.15
+            speedLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+            speedLbl.Text = "0"
+            speedLbl.Parent = bb
+            o.billboard = bb
+            o.nameLabel = nameLbl
+            o.speedLabel = speedLbl
+        else
+            o.billboard.Enabled = true
+            o.billboard.Adornee = head
+            if o.nameLabel then
+                o.nameLabel.Text = plr.DisplayName or plr.Name or ""
+                o.nameLabel.TextColor3 = accent
+            end
+        end
+        if o.speedLabel then
+            local vel = hrp.AssemblyLinearVelocity
+            local spd = Vector3.new(vel.X, 0, vel.Z).Magnitude
+            o.speedLabel.Text = tostring(spd < 0.5 and 0 or math.floor(spd + 0.5))
+            o.speedLabel.TextColor3 = accent
+        end
+    else
+        if o.highlight then pcall(function() o.highlight:Destroy() end); o.highlight = nil end
+        if o.billboard then
+            pcall(function() o.billboard:Destroy() end)
+            o.billboard = nil; o.nameLabel = nil; o.speedLabel = nil
+        end
     end
+
     if not myHrp then
         if o.line then
             if typeof(o.line) == "Instance" then o.line.Visible = false
@@ -7682,36 +7831,22 @@ function updatePlayerEsp(plr)
         return
     end
 
-
     if not o.line or (typeof(o.line) == "Instance" and not o.line.Parent) then
         if o.line then destroyTracerLine(o.line) end
         o.line = makeGuiTracerLine()
     end
     if not o.line then return end
 
-    local p1, on1 = cam:WorldToViewportPoint(myHrp.Position)
-    local p2, on2 = cam:WorldToViewportPoint(hrp.Position)
-
+    local p1 = cam:WorldToViewportPoint(myHrp.Position)
+    local p2 = cam:WorldToViewportPoint(hrp.Position)
     if p1.Z > 0 and p2.Z > 0 then
         local vsize = cam.ViewportSize
-        local from = Vector2.new(p1.X, p1.Y)
-        local to = Vector2.new(p2.X, p2.Y)
-
-        from = Vector2.new(
-            math.clamp(from.X, -50, vsize.X + 50),
-            math.clamp(from.Y, -50, vsize.Y + 50)
-        )
-        to = Vector2.new(
-            math.clamp(to.X, -50, vsize.X + 50),
-            math.clamp(to.Y, -50, vsize.Y + 50)
-        )
-        updateGuiTracerLine(o.line, from, to)
+        updateGuiTracerLine(o.line,
+            Vector2.new(math.clamp(p1.X, -50, vsize.X + 50), math.clamp(p1.Y, -50, vsize.Y + 50)),
+            Vector2.new(math.clamp(p2.X, -50, vsize.X + 50), math.clamp(p2.Y, -50, vsize.Y + 50)))
     else
-        if typeof(o.line) == "Instance" then
-            o.line.Visible = false
-        else
-            pcall(function() o.line.Visible = false end)
-        end
+        if typeof(o.line) == "Instance" then o.line.Visible = false
+        else pcall(function() o.line.Visible = false end) end
     end
 end
 

@@ -115,6 +115,7 @@ Config = {
     BatAimbot = false,
     BatAimbotKey = "H",
     AimbotSpeed = 55,
+    AimbotChaseMode = "NORMAL",  -- "NORMAL" | "BYPASS"
     AutoSwing = true,
     AutoBrainrot = false,
     MirrorTPDown = false,
@@ -2216,6 +2217,15 @@ numberBadge(aimbotSpeedRow, Config.AimbotSpeed, -60, 44, function(val)
     Config.AimbotSpeed = val
 end)
 
+-- Aimbot Chase Mode: NORMAL (PeakHub prediction) / BYPASS (Ambitious clean chase)
+if type(Config.AimbotChaseMode) ~= "string" or (Config.AimbotChaseMode ~= "NORMAL" and Config.AimbotChaseMode ~= "BYPASS") then
+    Config.AimbotChaseMode = "NORMAL"
+end
+cycleSelectorRow(combat, "Aimbot Mode", {"NORMAL", "BYPASS"}, Config.AimbotChaseMode, function(val)
+    Config.AimbotChaseMode = val
+    saveConfig()
+end)
+
 autoSwingRow, setAutoSwingVisual = toggleRow(combat, "Auto Swing", Config.AutoSwing, function(state)
     Config.AutoSwing = state
     if state then peakEquipBatOnce() end
@@ -4246,17 +4256,19 @@ startBatAimbot=function()
 
         local myPos = root.Position
         local targetPos = target.Position
-
         local targetVelocity = target.AssemblyLinearVelocity
-        local predictionTime = 0.14
         local targetLook = target.CFrame.LookVector
-        local predictedPos = targetPos + targetVelocity * predictionTime + targetLook * 0.3
-        local lead = predictedPos - targetPos
-        local maxLeadDistance = 7.5
-        if lead.Magnitude > maxLeadDistance then
-            predictedPos = targetPos + lead.Unit * maxLeadDistance
-        end
 
+        -- ============================================================
+        -- AIMBOT CHASE MODE
+        -- NORMAL  = PeakHub prediction (anticipo + front offset)
+        -- BYPASS  = Ambitious clean chase (no prediction, pathfind-ready)
+        -- ============================================================
+        local chaseMode = tostring(Config.AimbotChaseMode or "NORMAL"):upper()
+        if chaseMode ~= "BYPASS" then chaseMode = "NORMAL" end
+
+        local chasePos
+        local flatDir
         local targetForward = Vector3.new(targetLook.X, 0, targetLook.Z)
         if targetForward.Magnitude < 0.001 then
             local fallback = target.CFrame.RightVector
@@ -4267,15 +4279,44 @@ startBatAimbot=function()
         else
             targetForward = Vector3.new(0, 0, -1)
         end
-        local FRONT_OFFSET = 3.5
-        local chasePos = predictedPos + targetForward * FRONT_OFFSET
 
-        local direction = chasePos - myPos
-        local flatDir = Vector3.new(direction.X, 0, direction.Z)
-        if flatDir.Magnitude > 0 then
-            flatDir = flatDir.Unit
+        if chaseMode == "BYPASS" then
+            -- BYPASS: no prediction, chase real position (Ambitious style)
+            chasePos = targetPos
+            local direction = chasePos - myPos
+            flatDir = Vector3.new(direction.X, 0, direction.Z)
+            if flatDir.Magnitude > 0 then
+                flatDir = flatDir.Unit
+            else
+                flatDir = Vector3.zero
+            end
+            -- optional dynamic pathfinding hook (if present in environment)
+            if _G.AmbitiousPathfind and type(_G.AmbitiousPathfind.dirTo) == "function" and flatDir.Magnitude > 0 then
+                local pd = _G.AmbitiousPathfind.dirTo("aimbot", myPos, targetPos, {
+                    recompute = 0.35,
+                    drift = 4,
+                })
+                if pd then flatDir = pd end
+            end
         else
-            flatDir = Vector3.zero
+            -- NORMAL: PeakHub prediction + front offset
+            local predictionTime = 0.14
+            local predictedPos = targetPos + targetVelocity * predictionTime + targetLook * 0.3
+            local lead = predictedPos - targetPos
+            local maxLeadDistance = 7.5
+            if lead.Magnitude > maxLeadDistance then
+                predictedPos = targetPos + lead.Unit * maxLeadDistance
+            end
+            local FRONT_OFFSET = 3.5
+            chasePos = predictedPos + targetForward * FRONT_OFFSET
+
+            local direction = chasePos - myPos
+            flatDir = Vector3.new(direction.X, 0, direction.Z)
+            if flatDir.Magnitude > 0 then
+                flatDir = flatDir.Unit
+            else
+                flatDir = Vector3.zero
+            end
         end
 
         local chaseSpeed = math.clamp(
@@ -4283,8 +4324,13 @@ startBatAimbot=function()
             1, 120
         )
 
+        -- Height: +3.7 studs above chase point
         local desiredHeight = chasePos.Y + 3.7
         local yVel = (desiredHeight - myPos.Y) * 19.5
+        if chaseMode == "NORMAL" then
+            -- only Normal adds vertical prediction
+            yVel = yVel + targetVelocity.Y * 0.8
+        end
         if hum.FloorMaterial ~= Enum.Material.Air then
             yVel = math.max(yVel, 13)
         end
@@ -4293,19 +4339,39 @@ startBatAimbot=function()
         local desiredVel = Vector3.new(flatDir.X * chaseSpeed, yVel, flatDir.Z * chaseSpeed)
         root.AssemblyLinearVelocity = root.AssemblyLinearVelocity:Lerp(desiredVel, 0.8)
 
-        local travelDir = Vector3.new(targetVelocity.X, 0, targetVelocity.Z)
-        if travelDir.Magnitude > 1.25 then
-            travelDir = travelDir.Unit
+        -- Facing / rotation
+        if chaseMode == "BYPASS" then
+            -- Look at real target position with angular velocity (Ambitious)
+            local toTarget = targetPos - myPos
+            if toTarget.Magnitude > 0.1 then
+                local goalCF = CFrame.lookAt(myPos, targetPos)
+                local diffCF = root.CFrame:Inverse() * goalCF
+                local rx, ry, rz = diffCF:ToEulerAnglesXYZ()
+                rx = math.clamp(rx, -2.5, 2.5)
+                ry = math.clamp(ry, -2.5, 2.5)
+                rz = math.clamp(rz, -2.5, 2.5)
+                root.AssemblyAngularVelocity = root.CFrame:VectorToWorldSpace(Vector3.new(rx * 42, ry * 42, rz * 42))
+            end
         else
-            travelDir = targetForward
-        end
-        local facePos = myPos + travelDir * 10
-        if (facePos - myPos).Magnitude > 0.1 then
-            root.CFrame = CFrame.lookAt(myPos, facePos)
-            root.AssemblyAngularVelocity = Vector3.zero
+            -- PeakHub: face travel direction of target
+            local travelDir = Vector3.new(targetVelocity.X, 0, targetVelocity.Z)
+            if travelDir.Magnitude > 1.25 then
+                travelDir = travelDir.Unit
+            else
+                travelDir = targetForward
+            end
+            local facePos = myPos + travelDir * 10
+            if (facePos - myPos).Magnitude > 0.1 then
+                root.CFrame = CFrame.lookAt(myPos, facePos)
+                root.AssemblyAngularVelocity = Vector3.zero
+            end
         end
 
-        if targetDist <= HIT_DIST then
+        -- Swing: Bypass swings from activation (no distance gate on aim),
+        -- Normal keeps original HIT_DIST gate.
+        if chaseMode == "BYPASS" then
+            trySwing()
+        elseif targetDist <= HIT_DIST then
             trySwing()
         end
     end)
